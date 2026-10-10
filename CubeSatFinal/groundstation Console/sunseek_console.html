@@ -1,0 +1,2206 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>SunSeek Console · angle</title>
+<style>
+/* Layout: operator console — connection bar; left = tabs (Commands / PD tune / Mission) over the log + command line;
+   right = live telemetry, pointing-response plot, wheel plot, free plot */
+:root{
+  --paper:#eef1f3; --panel:#f8fafb; --ink:#1b2833; --muted:#5a6b78; --wire:#2c4a63; --rule:#c9d3da;
+  --copper:#b0602a; --warn:#a8740a; --warn-bg:#f6ecd4; --bad:#b3372e; --bad-bg:#f8e3e0; --ok:#2f7a55; --ok-bg:#e1f0e8;
+  --band:rgba(47,122,85,.13);
+  --mono:ui-monospace,"SF Mono",Menlo,Consolas,monospace;
+  --body:-apple-system,BlinkMacSystemFont,"Segoe UI",system-ui,sans-serif;
+}
+@media (prefers-color-scheme: dark){:root{
+  --paper:#11181e; --panel:#172129; --ink:#dbe4ea; --muted:#90a2b0; --wire:#93b3cb; --rule:#2a3843;
+  --copper:#e2894c; --warn:#e2b54e; --warn-bg:#2d2615; --bad:#ff7b6e; --bad-bg:#3a1c19; --ok:#62c08f; --ok-bg:#16291f;
+  --band:rgba(98,192,143,.16); color-scheme:dark}}
+*{box-sizing:border-box}
+html,body{height:100%}
+body{margin:0;background:var(--paper);color:var(--ink);font-family:var(--body);font-size:14px;display:flex;flex-direction:column}
+header{display:flex;flex-wrap:wrap;align-items:center;gap:8px 12px;padding:10px 16px;border-bottom:2px solid var(--wire);background:var(--panel)}
+header h1{font-size:18px;margin:0 6px 0 0;font-weight:700;letter-spacing:.02em}
+.state{font-family:var(--mono);font-size:12px;padding:3px 9px;border-radius:3px;border:1px solid var(--rule);color:var(--muted);white-space:nowrap}
+.state.on{color:var(--ok);border-color:var(--ok);background:var(--ok-bg)}
+.state.err{color:var(--bad);border-color:var(--bad);background:var(--bad-bg)}
+.state.act{color:var(--warn);border-color:var(--warn);background:var(--warn-bg)}
+.spacer{flex:1}
+button{font:inherit;font-size:13px;padding:6px 12px;border-radius:4px;border:1px solid var(--wire);background:var(--paper);color:var(--ink);cursor:pointer}
+button:hover{background:var(--panel)}
+button:focus-visible,input:focus-visible,select:focus-visible{outline:2px solid var(--copper);outline-offset:1px}
+button.primary{background:var(--wire);color:var(--paper)}
+button.stop{background:var(--bad);border-color:var(--bad);color:#fff;font-weight:700;letter-spacing:.06em;padding:6px 18px}
+button:disabled{opacity:.45;cursor:default}
+main{flex:1;min-height:0;display:grid;grid-template-columns:minmax(0,1.35fr) minmax(320px,1fr)}
+@media (max-width:900px){main{grid-template-columns:1fr;grid-auto-rows:minmax(320px,auto)}}
+.col{display:flex;flex-direction:column;min-height:0;min-width:0;border-right:1px solid var(--rule)}
+
+/* tabs */
+.tabs{display:flex;gap:0;border-bottom:1px solid var(--rule);background:var(--panel);padding:0 8px}
+.tabs button{border:0;border-bottom:3px solid transparent;border-radius:0;background:none;padding:9px 14px;font-weight:600;color:var(--muted)}
+.tabs button[aria-selected="true"]{color:var(--ink);border-bottom-color:var(--copper)}
+.tabpanel{max-height:58vh;overflow:auto;border-bottom:1px solid var(--rule)}
+.pad{padding:12px 14px;display:flex;flex-direction:column;gap:12px}
+.quick{display:flex;flex-wrap:wrap;gap:6px;padding:10px 12px}
+.quick .grp{font-family:var(--mono);font-size:11px;color:var(--muted);align-self:center;margin-left:6px;text-transform:uppercase;letter-spacing:.08em}
+.quick button{font-family:var(--mono);font-size:12px;padding:4px 8px}
+
+.row{display:flex;flex-wrap:wrap;align-items:flex-end;gap:10px 14px}
+.field{display:flex;flex-direction:column;gap:4px}
+.field>label,.lbl{font-family:var(--mono);font-size:11px;letter-spacing:.06em;text-transform:uppercase;color:var(--muted)}
+input[type=number],select{font-family:var(--mono);font-size:14px;padding:5px 8px;border:1px solid var(--wire);border-radius:4px;background:var(--paper);color:var(--ink);width:7.5em}
+.seg{display:inline-flex}
+.seg button{border-radius:0;font-family:var(--mono);font-size:12px;padding:6px 10px}
+.seg button:first-child{border-radius:4px 0 0 4px}
+.seg button:last-child{border-radius:0 4px 4px 0}
+.seg button+button{border-left:0}
+.seg button[aria-pressed="true"]{background:var(--wire);color:var(--paper)}
+.yawOnly[hidden]{display:none}
+.gains{display:grid;grid-template-columns:auto minmax(120px,1fr) auto auto;gap:8px 12px;align-items:center}
+.gains input[type=range]{width:100%;accent-color:var(--copper)}
+.gains .cur{font-family:var(--mono);font-size:12px;color:var(--muted);white-space:nowrap}
+.note{font-size:12.5px;color:var(--muted);margin:0;max-width:70ch;line-height:1.45}
+.note.err{color:var(--bad)} .note.ok{color:var(--ok)} .note.warn{color:var(--warn)}
+.cfg{font-family:var(--mono);font-size:12px;color:var(--muted);display:flex;flex-wrap:wrap;gap:4px 14px}
+.cfg b{color:var(--ink);font-weight:600}
+h3{margin:4px 0 0;font-size:13px;font-family:var(--mono);text-transform:uppercase;letter-spacing:.08em;color:var(--muted);font-weight:500}
+hr{border:0;border-top:1px solid var(--rule);margin:2px 0}
+.tw{overflow-x:auto;border:1px solid var(--rule);border-radius:4px;background:var(--panel)}
+table{border-collapse:collapse;width:100%;font-size:12.5px}
+th,td{padding:5px 6px;border-bottom:1px solid var(--rule);text-align:right;white-space:nowrap;font-variant-numeric:tabular-nums}
+th{font-family:var(--mono);font-size:10.5px;font-weight:500;color:var(--muted);letter-spacing:.04em;background:var(--paper);text-transform:uppercase}
+td{font-family:var(--mono)}
+th:first-child,td:first-child{text-align:left}
+tbody tr:last-child td{border-bottom:0}
+tr.live td{background:var(--warn-bg)}
+td.good{color:var(--ok)} td.bad{color:var(--bad)}
+.tgts td,.tgts th{text-align:left}
+.tgts input[type=number]{width:6.2em;font-size:13px;padding:3px 6px}
+.chip{display:inline-block;font-family:var(--mono);font-size:11px;padding:1px 7px;border-radius:3px;border:1px solid var(--rule);color:var(--muted)}
+.chip.act{color:var(--warn);border-color:var(--warn);background:var(--warn-bg)}
+.chip.ok{color:var(--ok);border-color:var(--ok);background:var(--ok-bg)}
+.chip.bad{color:var(--bad);border-color:var(--bad);background:var(--bad-bg)}
+.bar{display:inline-block;width:70px;height:6px;border-radius:3px;background:var(--rule);vertical-align:middle;margin-left:6px;overflow:hidden}
+.bar i{display:block;height:100%;background:var(--ok)}
+.x{padding:2px 8px;font-size:12px}
+.camgrid{display:grid;grid-template-columns:minmax(0,1.2fr) minmax(260px,1fr);gap:14px}
+@media (max-width:700px){.camgrid{grid-template-columns:1fr}}
+.camgrid>*{min-width:0}
+.frame{position:relative;background:#000;border:1px solid var(--rule);border-radius:4px;aspect-ratio:4/3;max-width:100%;display:flex;align-items:center;justify-content:center;overflow:hidden}
+.frame img{max-width:100%;max-height:100%;display:block}
+.frame .ph{color:#9aa7b2;font-family:var(--mono);font-size:12px;text-align:center;padding:12px;line-height:1.5}
+.frame .tag{position:absolute;left:8px;top:6px;font-family:var(--mono);font-size:11px;color:#fff;background:rgba(0,0,0,.55);padding:2px 6px;border-radius:3px}
+.frame .tag.live{background:rgba(179,55,46,.85)}
+/* crosshair = centre of the picture (the picture is always centred in the frame). Drawn over it, never into it. */
+.frame.xh:has(img)::before,.frame.xh:has(img)::after{content:"";position:absolute;pointer-events:none;z-index:2;filter:drop-shadow(0 0 1px rgba(0,0,0,.75));--xw:1px}
+@media (max-resolution:1.5dppx){.frame.xh:has(img)::before,.frame.xh:has(img)::after{--xw:2px}}   /* ordinary screens: 2 px so the line stays red */
+.frame.xh:has(img)::before{left:calc(50% - var(--xw) / 2);top:0;bottom:0;width:var(--xw);background:linear-gradient(to bottom,#ff2d20 calc(50% - 8px),transparent calc(50% - 8px),transparent calc(50% + 8px),#ff2d20 calc(50% + 8px))}
+.frame.xh:has(img)::after{top:calc(50% - var(--xw) / 2);left:0;right:0;height:var(--xw);background:linear-gradient(to right,#ff2d20 calc(50% - 8px),transparent calc(50% - 8px),transparent calc(50% + 8px),#ff2d20 calc(50% + 8px))}
+.kv.cam{grid-template-columns:repeat(3,minmax(0,1fr));border:1px solid var(--rule);border-radius:4px;overflow:hidden}
+.kv.cam b{font-size:13px}
+.kv.cam b.ok{color:var(--ok)} .kv.cam b.bad{color:var(--bad)}
+.gal td:first-child,.gal th:first-child{text-align:left}
+.gal td{font-family:var(--mono)}
+.thumbrow{display:flex;gap:12px;align-items:center;flex-wrap:wrap}
+.thumb{width:120px;height:90px;object-fit:cover;background:#000;border:1px solid var(--rule);border-radius:3px}
+input[type=text].url{font-family:var(--mono);font-size:13px;padding:5px 8px;border:1px solid var(--wire);border-radius:4px;background:var(--paper);color:var(--ink);width:16em;max-width:100%}
+.prof{display:grid;grid-template-columns:auto repeat(3,minmax(0,auto)) 1fr;gap:6px 10px;align-items:center}
+.prof input[type=number]{width:6.2em;font-size:13px;padding:4px 6px}
+.prof .h{font-family:var(--mono);font-size:10.5px;color:var(--muted);letter-spacing:.04em;text-transform:uppercase}
+.prof .cur{font-family:var(--mono);font-size:12px;color:var(--muted);white-space:nowrap}
+.derived{display:flex;flex-wrap:wrap;gap:4px 16px;font-family:var(--mono);font-size:12px;color:var(--muted)}
+.derived b{color:var(--ink);font-weight:600}
+.derived .bad{color:var(--bad)}
+
+#log{flex:1;min-height:150px;overflow:auto;margin:0;padding:10px 12px;font-family:var(--mono);font-size:12.5px;line-height:1.45;white-space:pre-wrap;word-break:break-all}
+#log .tx{color:var(--copper)} #log .ack{color:var(--ok)} #log .err{color:var(--bad)} #log .evt{color:var(--warn)} #log .sys{color:var(--muted);font-style:italic}
+#log .tm{color:var(--ink)} #log .pl{color:var(--wire)}
+form.cmd{display:flex;gap:8px;padding:10px 12px;border-top:1px solid var(--rule);background:var(--panel)}
+form.cmd input{flex:1;min-width:0;font-family:var(--mono);font-size:14px;padding:7px 10px;border:1px solid var(--wire);border-radius:4px;background:var(--paper);color:var(--ink)}
+.logbar{display:flex;gap:8px;align-items:center;padding:6px 12px;border-top:1px solid var(--rule);font-size:12px;color:var(--muted)}
+.logbar label{display:flex;gap:4px;align-items:center}
+aside{display:flex;flex-direction:column;min-height:0;overflow:auto}
+aside h2{font-size:12px;font-family:var(--mono);text-transform:uppercase;letter-spacing:.1em;color:var(--muted);margin:0;padding:12px 14px 6px;font-weight:500;display:flex;gap:10px;align-items:baseline}
+aside h2 small{font-size:11px;text-transform:none;letter-spacing:0}
+.kv{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:1px;background:var(--rule);border-block:1px solid var(--rule)}
+.kv div{background:var(--panel);padding:6px 12px;display:flex;flex-direction:column;gap:1px;min-width:0}
+.kv span{font-family:var(--mono);font-size:10.5px;color:var(--muted);letter-spacing:.04em}
+.kv b{font-family:var(--mono);font-size:15px;font-weight:600;font-variant-numeric:tabular-nums;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.kv b.stale{color:var(--muted);font-weight:400}
+.plotbar{display:flex;gap:8px;align-items:center;padding:4px 14px 6px;font-size:12px;color:var(--muted)}
+.plotbar select{font-size:12px;padding:3px 6px;width:auto}
+.legend{display:flex;gap:12px;flex-wrap:wrap;padding:0 14px 4px;font-family:var(--mono);font-size:11px;color:var(--muted)}
+.legend i{display:inline-block;width:16px;height:0;border-top:2px solid;vertical-align:middle;margin-right:4px}
+canvas{display:block;width:calc(100% - 28px);margin:0 14px;background:var(--panel);border:1px solid var(--rule);border-radius:3px}
+#resp{height:180px} #rwc{height:90px} #plot{height:140px}
+#all{font-family:var(--mono);font-size:12px;padding:6px 14px 16px;display:grid;grid-template-columns:auto 1fr;gap:2px 12px}
+#all span:nth-child(odd){color:var(--muted)}
+#all span{overflow-wrap:anywhere}
+.hint{font-size:12.5px;color:var(--muted);padding:8px 14px;line-height:1.5;margin:0}
+.hint code{font-family:var(--mono)}
+.sc textarea{width:100%;min-height:170px;font-family:var(--mono);font-size:12px;line-height:1.45;padding:8px;border:1px solid var(--rule);border-radius:4px;background:var(--panel);color:var(--ink);resize:vertical;box-sizing:border-box}
+#scTbl td.bad{color:var(--bad);font-weight:600}
+</style>
+</head>
+<body>
+<header>
+  <h1>SunSeek Console <small style="font-weight:400;font-size:12px;color:var(--muted);letter-spacing:.04em">angle version</small></h1>
+  <span id="state" class="state">disconnected</span>
+  <span id="chipAdcs" class="state" title="ADCS mode from telemetry">ADCS —</span>
+  <span id="chipMission" class="state" title="Mission state">MISSION —</span>
+  <span id="chipCam" class="state" title="Camera payload over Wi-Fi">CAM —</span>
+  <button id="btnBle" class="primary" type="button">Connect BLE</button>
+  <button id="btnSer" type="button">Connect USB</button>
+  <button id="btnDis" type="button" disabled>Disconnect</button>
+  <span class="spacer"></span>
+  <button id="btnStop" class="stop" type="button" title="Stops any console mission, then sends STOP: ADCS to MANUAL, wheel stop">STOP</button>
+</header>
+
+<main>
+  <section class="col">
+    <nav class="tabs" role="tablist" aria-label="Panels">
+      <button role="tab" type="button" data-tab="tabCmd" aria-selected="true">Commands</button>
+      <button role="tab" type="button" data-tab="tabSun" aria-selected="false">Sun cal</button>
+      <button role="tab" type="button" data-tab="tabTune" aria-selected="false">PD tune</button>
+      <button role="tab" type="button" data-tab="tabMom" aria-selected="false">Momentum</button>
+      <button role="tab" type="button" data-tab="tabMission" aria-selected="false">Mission</button>
+      <button role="tab" type="button" data-tab="tabPayload" aria-selected="false">Payload</button>
+    </nav>
+
+    <!-- ============ COMMANDS ============ -->
+    <div id="tabCmd" class="tabpanel" role="tabpanel"><div class="quick" id="quick"></div></div>
+
+    <!-- ============ SUN CAL ============ -->
+    <div id="tabSun" class="tabpanel" role="tabpanel" hidden>
+      <div class="pad sc">
+        <div class="row">
+          <button class="primary" type="button" id="scStart">Start (MANUAL + SUN stream 10 Hz)</button>
+          <button type="button" id="scStop">Stream off</button>
+          <div class="field"><label for="scN">Samples / point</label><input type="number" id="scN" min="5" max="200" step="5" value="20"></div>
+          <div class="field"><label for="scSat">Saturation ≥ counts</label><input type="number" id="scSat" min="500" max="4095" step="5" value="4000"></div>
+          <div class="field"><label for="scFloor">No-source L+R &lt;</label><input type="number" id="scFloor" min="0" max="8000" step="10" value="300"></div>
+        </div>
+        <p class="note">Sends <code>ADCS_MODE,MANUAL</code> → <code>RW_STOP</code> → <code>TM_STREAM,SUN,ON</code> → <code>TM_RATE,10</code>. The wheel must be off while you calibrate. NDV is recomputed here from the raw counts exactly as the firmware does: (L−R)/(L+R).</p>
+        <div class="kv cam" id="scLive"></div>
+        <div class="row">
+          <div class="field"><label for="scAngle">True angle ° (+ = source on LEFT side)</label><input type="number" id="scAngle" min="-90" max="90" step="5" value="0"></div>
+          <div class="field"><span class="lbl">Step</span><div class="seg"><button type="button" id="scMinus">−5°</button><button type="button" id="scPlus">+5°</button></div></div>
+          <button class="primary" type="button" id="scRecord">Record point</button>
+          <button type="button" id="scDark">Record dark</button>
+          <p class="note" id="scMsg">Point the source, hold the stack still, press Record. A point at the same angle replaces the old one. After flashing your model, re-record the same angles: the FW err column is the verification.</p>
+        </div>
+        <div class="tw">
+          <table id="scTbl">
+            <thead><tr><th>Use</th><th>Angle</th><th>n</th><th>L</th><th>R</th><th>L+R</th><th>NDV</th><th>σ NDV</th><th>FW angle</th><th>FW err</th><th>Flags</th><th></th></tr></thead>
+            <tbody id="scBody"><tr><td colspan="12" style="text-align:left;color:var(--muted)">No points yet.</td></tr></tbody>
+          </table>
+        </div>
+        <canvas id="scPlot" height="230" style="width:100%;margin:0"></canvas>
+        <div class="row">
+          <div class="field"><span class="lbl">Model</span>
+            <div class="seg"><button type="button" id="scMLut" aria-pressed="true">LUT + interp</button><button type="button" id="scMPoly" aria-pressed="false">Poly 3</button><button type="button" id="scMLin" aria-pressed="false">Linear</button></div></div>
+          <button class="primary" type="button" id="scGen">Generate C++</button>
+          <button type="button" id="scCopy">Copy code</button>
+          <button type="button" id="scCsv">Save CSV</button>
+          <button type="button" id="scLoad">Load CSV</button><input type="file" id="scFile" accept=".csv,text/csv" hidden>
+          <button type="button" id="scUnflag">Uncheck FLAT/SAT</button>
+          <button type="button" id="scClear">Clear points</button>
+        </div>
+        <div class="cfg" id="scFit">Record at least 5 points, then Generate C++.</div>
+        <textarea id="scCode" spellcheck="false" readonly placeholder="estimateSunAngle() code appears here. Paste it over the TEAM AREA function in include/Config_Sensor.h, build, upload, then re-record to verify."></textarea>
+      </div>
+    </div>
+
+    <!-- ============ PD TUNE ============ -->
+    <div id="tabTune" class="tabpanel" role="tabpanel" hidden>
+      <div class="pad">
+        <div class="row">
+          <div class="field"><span class="lbl">Strategy (MANUAL only)</span>
+            <div class="seg"><button type="button" id="stratR" aria-pressed="false">REACTION</button><button type="button" id="stratM" aria-pressed="false">MOMENTUM</button></div></div>
+          <div class="field"><span class="lbl">Reference (MANUAL only)</span>
+            <div class="seg"><button type="button" id="refSun" aria-pressed="false">SUN</button><button type="button" id="refMag" aria-pressed="false">MAG</button><button type="button" id="refYaw" aria-pressed="false" title="Relative yaw from the EKF (gyro + magnetometer), measured from the zero datum. Needs the firmware with Module_YawEKF (8 Oct).">YAW</button></div></div>
+          <div class="field yawOnly" hidden><span class="lbl">Zero datum (YAW)</span>
+            <div class="seg"><button type="button" id="btnYawZero" title="Sends YAW_ZERO: the attitude the spacecraft is in now becomes 0°. Refused while AUTO is flying on YAW.">Zero here</button><button type="button" id="btnYawStatus" title="Sends YAW_STATUS and shows the filter health">EKF status</button></div></div>
+          <div class="cfg" id="craftCfg"></div>
+        </div>
+        <div class="cfg yawOnly" id="yawCfg" hidden></div>
+
+        <div class="gains">
+          <label class="lbl" for="kp">Kp</label><input type="range" id="kpR" min="0" max="20" step="0.05" aria-label="Kp slider"><input type="number" id="kp" min="0" max="20" step="0.05"><span class="cur" id="kpCur"></span>
+          <label class="lbl" for="kd">Kd</label><input type="range" id="kdR" min="0" max="20" step="0.05" aria-label="Kd slider"><input type="number" id="kd" min="0" max="20" step="0.05"><span class="cur" id="kdCur"></span>
+          <label class="lbl" for="bias" title="v2.1 momentum bias. v3.0 uses the Momentum tab profile instead.">Bias % v2.1</label><input type="range" id="biasR" min="0" max="100" step="1" aria-label="Momentum bias slider"><input type="number" id="bias" min="0" max="100" step="1"><span class="cur" id="biasCur"></span>
+        </div>
+        <div class="row">
+          <button class="primary" type="button" id="btnTune">Apply gains</button>
+          <p class="note" id="tuneMsg">Sends <code>ADCS_TUNE,Kp,Kd,Bias</code>. Works in MANUAL or AUTO and takes effect on the next 20 ms cycle. Bias here is only used by v2.1 firmware; v3.0 MOMENTUM uses the profile in the Momentum tab.</p>
+        </div>
+        <hr>
+        <div class="row">
+          <div class="field"><label for="tgt" id="tgtLbl">Target °</label><input type="number" id="tgt" min="-90" max="90" step="0.5" value="0"></div>
+          <div class="field"><span class="lbl" id="quickLbl">Quick step</span>
+            <div class="seg" id="tgtQuick"></div></div>
+          <div class="field"><label for="band">Settle band ±°</label><input type="number" id="band" min="0.1" max="30" step="0.1" value="2"></div>
+        </div>
+        <div class="row">
+          <button class="primary" type="button" id="btnGo">Go to target (AUTO)</button>
+          <button type="button" id="btnRelease">Release (RW_STOP)</button>
+          <p class="note" id="goMsg">Go sends <code>ADCS_MODE,MANUAL</code> → <code>ADCS_REFERENCE</code> → <code>SET_TARGET</code> → <code>ADCS_MODE,AUTO</code> and records the step below. The firmware's deadband is ±2°: inside it the controller outputs 0.</p>
+        </div>
+        <h3>Step results</h3>
+        <div class="tw">
+          <table id="stepTbl">
+            <thead><tr><th>#</th><th>Target</th><th>Kp</th><th>Kd</th><th>Bias</th><th>Strat</th><th>Start err</th><th>Reach</th><th>Overshoot</th><th>Settled</th><th>Final err</th><th>σ</th><th>Peak RW</th><th>Sat</th><th>Kicks</th></tr></thead>
+            <tbody id="stepBody"><tr><td colspan="15" style="text-align:left;color:var(--muted)">No steps yet. Press Go to target with the ADCS stream on.</td></tr></tbody>
+          </table>
+        </div>
+        <div class="row">
+          <button type="button" id="btnStepsCsv">Save results CSV</button>
+          <button type="button" id="btnStepsClear">Clear results</button>
+          <p class="note">Reach = first time inside the band. Settled = inside the band and stayed for ≥ 1 s. Final err and σ are measured after settling. Sat = share of samples with the wheel at its limit. Telemetry arrives at 4 Hz, so times are ±0.25 s.</p>
+        </div>
+      </div>
+    </div>
+
+    <!-- ============ MOMENTUM (v3.0) ============ -->
+    <div id="tabMom" class="tabpanel" role="tabpanel" hidden>
+      <div class="pad">
+        <div class="row">
+          <span id="mpChip" class="chip">profile: unknown</span>
+          <button type="button" id="btnMpRead">Read from spacecraft</button>
+          <button type="button" id="btnMpClear">Clear on spacecraft</button>
+          <p class="note" id="mpFw"></p>
+        </div>
+        <div class="prof">
+          <span class="h"></span><span class="h">delta %</span><span class="h">assist %</span><span class="h">ms</span><span class="h">spacecraft has</span>
+          <label class="lbl" for="mpBias">Bias</label><input type="number" id="mpBias" min="0" max="100" step="1"><span></span><span></span><span class="cur" id="mpBiasCur"></span>
+          <span class="lbl">CW kick</span><input type="number" id="mpCwD" min="1" max="100" step="1" aria-label="CW delta"><input type="number" id="mpCwA" min="-100" max="100" step="1" aria-label="CW assist"><input type="number" id="mpCwM" min="0" max="10000" step="10" aria-label="CW ms"><span class="cur" id="mpCwCur"></span>
+          <span class="lbl">CCW kick</span><input type="number" id="mpCcwD" min="-100" max="-1" step="1" aria-label="CCW delta"><input type="number" id="mpCcwA" min="-100" max="100" step="1" aria-label="CCW assist"><input type="number" id="mpCcwM" min="0" max="10000" step="10" aria-label="CCW ms"><span class="cur" id="mpCcwCur"></span>
+          <span class="lbl">Recovery</span><input type="number" id="mpRecS" min="1" max="100" step="1" aria-label="Recovery step"><span class="h">step % every</span><input type="number" id="mpRecM" min="10" max="10000" step="10" aria-label="Recovery interval ms"><span class="cur" id="mpRecCur"></span>
+          <label class="lbl" for="mpTrig">Trigger</label><input type="number" id="mpTrig" min="0.1" max="100" step="0.5"><span class="h">demand</span><span></span><span class="cur" id="mpTrigCur"></span>
+        </div>
+        <div class="derived" id="mpDerived"></div>
+        <div class="row">
+          <button class="primary" type="button" id="btnMpSend">Send profile (MANUAL)</button>
+          <button type="button" id="btnPrep">Prepare: spin up to bias</button>
+          <div class="field"><label for="spinWait" title="Minimum wait after ADCS_PREPARE; then the console also waits until |GYRO_Z| < 2 °/s for 1 s">Min spin-up wait s</label><input type="number" id="spinWait" min="0" max="30" step="0.5"></div>
+          <label class="note"><input type="checkbox" id="mpAuto" checked> Re-send this profile automatically when the spacecraft has none</label>
+        </div>
+        <p class="note" id="mpMsg">Fill all five parts, then Send. The spacecraft keeps the profile in RAM only, so a reset clears it.</p>
+        <hr>
+        <h3>Kick log <small style="text-transform:none;letter-spacing:0">angle moved by each kick, measured from EST_ANGLE</small></h3>
+        <div class="derived" id="kickSum"></div>
+        <div class="tw">
+          <table id="kickTbl">
+            <thead><tr><th>#</th><th>Time</th><th>Mode</th><th>Dir</th><th>Wheel</th><th>Angle before</th><th>Angle after</th><th>Δθ</th><th title="Angle change 3 s after the kick ended, if no new kick started. Much smaller than Δθ = the body creeps back (drag-type friction).">Δθ +3 s</th><th>Cycle</th></tr></thead>
+            <tbody id="kickBody"></tbody>
+          </table>
+        </div>
+        <div class="row">
+          <button type="button" id="btnKickCsv">Save kicks CSV</button>
+          <button type="button" id="btnKickClear">Clear kicks</button>
+          <p class="note">A kick is detected when the wheel leaves BIAS and logged 0.5 s after it is back. Δθ +3 s is filled in only when no other kick followed. If it is much smaller than Δθ, the body creeps back after each kick (drag-type friction), and momentum kicks will struggle to converge on this rig. Needs the ADCS stream (4 Hz), so Δθ is approximate. Characterise in AUTO: set a target 10–20° away and watch the kicks.</p>
+        </div>
+        <hr>
+        <h3>Manual wheel (MANUAL + MOMENTUM)</h3>
+        <div class="row">
+          <div class="field"><label for="manBias">RW_BIAS %</label><input type="number" id="manBias" min="0" max="100" step="1" value="40"></div>
+          <button type="button" id="btnManBias">Set bias</button>
+          <div class="field"><label for="manD">RW_CMD delta</label><input type="number" id="manD" min="-100" max="100" step="1" value="15"></div>
+          <div class="field"><label for="manA">assist</label><input type="number" id="manA" min="-100" max="100" step="1" value="100"></div>
+          <div class="field"><label for="manM">ms</label><input type="number" id="manM" min="0" max="10000" step="10" value="200"></div>
+          <button type="button" id="btnManCmd">Send RW_CMD</button>
+        </div>
+        <p class="note">In MANUAL there is no automatic recovery: the wheel stays at bias + delta until you send RW_BIAS again (an abrupt step). <code>RW_CMD</code> deltas add to the current target, not the bias.</p>
+      </div>
+    </div>
+
+    <!-- ============ MISSION ============ -->
+    <div id="tabMission" class="tabpanel" role="tabpanel" hidden>
+      <div class="pad">
+        <div class="row">
+          <div class="field"><span class="lbl">Run by</span>
+            <div class="seg"><button type="button" id="runCraft" aria-pressed="true">Spacecraft (MISSION_*)</button><button type="button" id="runConsole" aria-pressed="false">Console step-through</button></div></div>
+          <div class="field"><span class="lbl">Reference</span>
+            <div class="seg"><button type="button" id="mRefSun" aria-pressed="false">SUN</button><button type="button" id="mRefMag" aria-pressed="false">MAG</button><button type="button" id="mRefYaw" aria-pressed="false" title="Relative yaw from the EKF: targets are angles from the zero datum, −180…+180°">YAW</button></div></div>
+          <div class="field yawOnly" hidden><span class="lbl">Zero datum (YAW)</span>
+            <button type="button" id="mBtnYawZero" title="Sends YAW_ZERO: the attitude the spacecraft is in now becomes 0°. Do it before Upload / Start.">Zero here</button></div>
+          <div class="field"><label for="maxMin">Max duration (min)</label><select id="maxMin"></select></div>
+        </div>
+        <p class="note" id="runNote"></p>
+        <div class="tw">
+          <table class="tgts">
+            <thead><tr><th>#</th><th id="mAngleHdr" title="The angle you want the spacecraft to end on.">Angle °</th><th title="Added to the target before it is sent: set angle = target + offset. Filled in by Apply next angles; you can also type it.">Offset °</th><th>Tolerance ±°</th><th>Hold s</th><th title="Tick = take a picture when this target has been held. The box here ticks or clears all targets."><label><input type="checkbox" id="capAll"> Capture</label></th><th>Status</th><th title="From telemetry, no picture: the angle the spacecraft reported while it held the target and captured, the error against the target, and the angle to set next time.">Final angle</th><th></th></tr></thead>
+            <tbody id="tgtBody"></tbody>
+          </table>
+        </div>
+        <div class="row">
+          <button type="button" id="btnAddTgt">+ Add target</button>
+          <label class="note consoleOnly"><input type="checkbox" id="optRelease" checked> Release wheel when finished</label>
+        </div>
+        <div class="row">
+          <button type="button" id="btnUpload" class="craftOnly">1 · Upload &amp; prepare</button>
+          <button type="button" id="btnMStart" class="primary">Start</button>
+          <button type="button" id="btnMAbort">Abort</button>
+          <button type="button" id="btnMReset" class="craftOnly">Reset</button>
+          <span class="cfg" id="mElapsed"></span>
+        </div>
+        <p class="note" id="mMsg"></p>
+        <hr>
+        <div class="row">
+          <button type="button" id="mBtnView" title="Opens the Payload tab. Disabled while a mission is running.">View pictures in Payload tab</button>
+          <p class="note" id="mCamNote">No picture is shown on this tab, and the console does not load pictures by itself while a mission is running. View them in the Payload tab after the mission is complete.</p>
+        </div>
+        <hr>
+        <h3>Final angle and next set angle</h3>
+        <div class="row">
+          <button type="button" id="btnFinApply" title="Writes the offsets that give the &quot;next set&quot; angles. The target angles stay as they are.">Apply next angles</button>
+          <button type="button" id="btnFinUndo" disabled>Undo</button>
+          <button type="button" id="btnFinClear" title="Sets every offset to 0.">Clear offsets</button>
+        </div>
+        <p class="note" id="finMsg"></p>
+        <p class="note">No picture is used here. <b>Final</b> is the spacecraft's own angle (TARGET − POINTING_ERROR in the ADCS telemetry), averaged from 1 s before the hold was complete until the capture was done. <b>Error</b> = final − target (+ = ended to the right of the target). <b>Next set</b> is the angle to send next time so that the spacecraft ends on the target: set angle − error. <b>Apply next angles</b> stores it as an offset; the target stays as you typed it, and Upload sends target + offset. This corrects where the control loop comes to rest. It cannot see an error of the sensor itself (compass calibration, zero datum): for that, look at the pictures after the mission and type the offset by hand. The correction is right only if the same error repeats, so keep the same targets in the same order.</p>
+      </div>
+    </div>
+
+    <!-- ============ PAYLOAD (ESP32-CAM over Wi-Fi) ============ -->
+    <div id="tabPayload" class="tabpanel" role="tabpanel" hidden>
+      <div class="pad">
+        <div class="row">
+          <div class="field"><label for="camUrl">Camera address</label><input type="text" class="url" id="camUrl" value="http://192.168.4.1" spellcheck="false"></div>
+          <button class="primary" type="button" id="btnCamConnect">Connect camera</button>
+          <button type="button" id="btnCamDisconnect">Disconnect</button>
+          <span id="camChip" class="chip">not connected</span>
+        </div>
+        <p class="note" id="camMsg">Join the camera's Wi-Fi on this Mac first: network <b>SUNSEEK-PAYLOAD</b>, password <b>sunseek01</b>. BLE to the spacecraft keeps working; internet on the Mac stops while you are on that network. Commands (capture, stream on/off) go through the spacecraft, so keep BLE or USB connected for those.</p>
+        <div class="kv cam" id="camKv"></div>
+        <div class="camgrid">
+          <div>
+            <div class="row">
+              <button class="primary" type="button" id="btnStreamOn">Start stream</button>
+              <button type="button" id="btnStreamOff">Stop stream</button>
+              <button type="button" id="btnStreamView">View only</button>
+              <span class="cfg" id="streamInfo"></span>
+            </div>
+            <div class="frame" id="streamFrame"><span class="ph">Live stream appears here.<br>Start stream sends PAYLOAD_STREAM_START to the spacecraft, then opens :81/stream.</span></div>
+          </div>
+          <div>
+            <div class="row">
+              <button class="primary" type="button" id="btnCapture">Capture</button>
+              <button type="button" id="btnShowLatest">Show latest</button>
+              <button type="button" id="btnDlLatest">Download latest</button>
+              <label class="note" title="A capture made while a mission is running is never loaded automatically."><input type="checkbox" id="optAutoShow" checked> show each capture (not during a mission)</label>
+              <label class="note" title="Red lines through the centre of the picture, with a gap at the centre so the strip under it stays visible. Shown on the captured picture and on the live stream. The saved file has no lines."><input type="checkbox" id="optXhair" checked> crosshair</label>
+            </div>
+            <div class="frame" id="viewFrame"><span class="ph">Captured image appears here.</span></div>
+            <div class="row">
+              <span class="cfg" id="viewInfo">—</span>
+              <button type="button" id="btnDlView" disabled>Download this image</button>
+            </div>
+            <p class="note" id="capMsg"></p>
+          </div>
+        </div>
+        <h3>Images on the SD card</h3>
+        <div class="row">
+          <button type="button" id="btnGallery">Refresh list</button>
+          <span class="cfg" id="galInfo"></span>
+        </div>
+        <div class="tw">
+          <table class="gal"><thead><tr><th>Name</th><th>Size</th><th>View</th><th>Download</th></tr></thead><tbody id="galBody"><tr><td colspan="4" style="text-align:left;color:var(--muted)">Connect the camera and press Refresh list.</td></tr></tbody></table>
+        </div>
+      </div>
+    </div>
+
+    <pre id="log" aria-live="polite"></pre>
+    <div class="logbar">
+      <label><input id="autoscroll" type="checkbox" checked> auto-scroll</label>
+      <label><input id="hideTm" type="checkbox"> hide TM lines</label>
+      <span class="spacer"></span>
+      <span id="counts">0 lines</span>
+      <button id="btnCsv" type="button">Save log</button>
+      <button id="btnClear" type="button">Clear</button>
+    </div>
+    <form class="cmd" id="cmdForm" autocomplete="off">
+      <input id="cmd" placeholder="Telecommand, e.g. STATUS · SET_TARGET,20 · ADCS_TUNE,2,0.5,40   (↑/↓ history)" spellcheck="false" aria-label="Telecommand">
+      <button class="primary" type="submit">Send</button>
+    </form>
+  </section>
+
+  <aside>
+    <h2>Spacecraft</h2>
+    <div class="kv" id="pinned"></div>
+    <h2>Pointing <small id="respNote"></small></h2>
+    <div class="legend"><span title="target − POINTING_ERROR: the estimated angle, unwrapped around the target so MAG headings do not jump at 0/360°"><i style="border-color:var(--copper)"></i>angle</span><span><i style="border-color:var(--wire);border-top-style:dashed"></i>TARGET</span><span><i style="border-color:var(--ok);border-top-width:6px;opacity:.5"></i>tolerance</span></div>
+    <canvas id="resp" width="600" height="180"></canvas>
+    <h2>Wheel command <small>RW_CMD %, dashed = ±limit</small></h2>
+    <canvas id="rwc" width="600" height="90"></canvas>
+    <h2>Plot</h2>
+    <div class="plotbar">
+      <select id="plotKey" aria-label="Value to plot"></select>
+      <span id="plotVal"></span>
+    </div>
+    <canvas id="plot" width="600" height="140"></canvas>
+    <h2>All telemetry fields</h2>
+    <div id="all"></div>
+    <p class="hint">Live values need telemetry. It is off after boot; PD tune and Mission turn on <code>TM_STREAM,ADCS</code> for you (4 Hz). BLE and USB carry the same commands.</p>
+  </aside>
+</main>
+
+<script>
+"use strict";
+const NUS = "6e400001-b5a3-f393-e0a9-e50e24dcca9e";
+const NUS_RX = "6e400002-b5a3-f393-e0a9-e50e24dcca9e"; // we write commands here
+const NUS_TX = "6e400003-b5a3-f393-e0a9-e50e24dcca9e"; // firmware notifies telemetry here
+
+const QUICK = [
+  ["Link", ["PING","STATUS","HELP","SENSOR_STATUS","IMU_STATUS"]],
+  ["Streams", [["ADCS stream","TM_STREAM,ADCS,ON"],["Sensors stream","TM_STREAM,ALL,ON"],["Rate 10 Hz","TM_RATE,10"],["Quiet","TM_STREAM,QUIET"]]],
+  ["Wheel", [["RW +20","RW,20"],["RW −20","RW,-20"],["RW 0","RW,0"],"RW_STOP"]],
+  ["ADCS", ["ADCS_MODE,MANUAL","ADCS_REFERENCE,SUN","ADCS_REFERENCE,MAG","SET_TARGET,0","ADCS_PREPARE","ADCS_MODE,AUTO"]],
+  ["Yaw EKF", ["ADCS_REFERENCE,YAW","YAW_ZERO","YAW_STATUS","YAW_RESET"]],
+  ["Cal", ["GYRO_OFFSET","SUN_RAW","GYRO_RAW","MAG_RAW","MAG_CAL_START","MAG_CAL_STOP","ESTIMATOR_STATUS"]],
+  ["Payload", ["PAYLOAD_PING","PAYLOAD_STATUS","CAPTURE","PAYLOAD_LAST_IMAGE","PAYLOAD_IMAGE_COUNT","PAYLOAD_STREAM_START","PAYLOAD_STREAM_STOP","PAYLOAD_STREAM_STATUS"]],
+  ["Mission", ["MISSION_STATUS","MISSION_PREPARE","MISSION_START","MISSION_ABORT","MISSION_RESET"]],
+  ["Strategy", ["ADCS_STRATEGY,REACTION","ADCS_STRATEGY,MOMENTUM","MOM_PROFILE_STATUS"]],
+];
+const PINNED = ["ADCS_MODE","ADCS_REFERENCE","TARGET","POINTING_ERROR","EST_ANGLE","SUN_ANGLE",
+  "MAG_HEADING","MAG_ERROR","YAW_REL","YAW_SIGMA","YAW_BIAS","GYRO_Z","RW_CMD","KP","KD","ADCS_STRATEGY","RW_STATE","MISSION_STATE","TARGET_INDEX","SUN_L","SUN_R","CAMERA","LAST_IMAGE"];
+const MAX_LIST = [1,2,3,4,5,6,7,8,9,10,11,12,13,14,15,20,30];
+
+const $ = id => document.getElementById(id);
+const logEl = $("log");
+let link = null;            // {kind, send(text), close()}
+let rxBuf = "";
+let lines = [];             // [{t, dir, text}]
+const fields = new Map();   // key -> {v, t}
+const series = new Map();   // key -> [[t, num], ...]
+const history = []; let histPos = 0;
+const MAX_LOG = 4000, MAX_PTS = 900;
+const store = {
+  get(k, d){ try{ const v = localStorage.getItem("sunseek." + k); return v ? JSON.parse(v) : d; }catch(_){ return d; } },
+  set(k, v){ try{ localStorage.setItem("sunseek." + k, JSON.stringify(v)); }catch(_){} }
+};
+const num = k => { const f = fields.get(k); const n = f ? Number(f.v) : NaN; return Number.isFinite(n) ? n : null; };
+const sleep = ms => new Promise(r => setTimeout(r, ms));
+
+/* =============================== LOG =============================== */
+function classify(text, dir){
+  if (dir === "tx") return "tx";
+  if (dir === "sys") return "sys";
+  if (text.startsWith("ACK")) return "ack";
+  if (text.startsWith("ERR")) return "err";
+  if (text.startsWith("EVT")) return "evt";
+  if (text.startsWith("PAYLOAD")) return "pl";
+  if (text.startsWith("TM")) return "tm";
+  return "";
+}
+function addLine(text, dir){
+  const t = new Date();
+  lines.push({t, dir, text});
+  if (lines.length > MAX_LOG) lines.splice(0, lines.length - MAX_LOG);
+  const cls = classify(text, dir);
+  if (cls === "tm" && $("hideTm").checked) { $("counts").textContent = lines.length + " lines"; return; }
+  const div = document.createElement("div");
+  div.className = cls;
+  const ts = t.toTimeString().slice(0,8);
+  div.textContent = (dir === "tx" ? ts + " » " : dir === "sys" ? ts + " · " : ts + "   ") + text;
+  logEl.appendChild(div);
+  while (logEl.childElementCount > 1500) logEl.firstChild.remove();
+  if ($("autoscroll").checked) logEl.scrollTop = logEl.scrollHeight;
+  $("counts").textContent = lines.length + " lines";
+}
+const sys = m => addLine(m, "sys");
+
+/* =========================== TELEMETRY ============================= */
+function parseTM(text){
+  // Flat key/value: TM,KEY,VAL,KEY,VAL,...
+  if (!text.startsWith("TM,")) return;
+  const p = text.split(",");
+  if (p[1] === "HELP") return;
+  const now = performance.now();
+  const kv = {};
+  // Odd token count after "TM" = tagged line, e.g. TM,MOM_PROFILE,READY,1,BIAS,40,…  → keys "MOM_PROFILE.READY", …
+  const tagged = (p.length - 1) % 2 === 1, tag = tagged ? p[1].trim() : "";
+  for (let i = tagged ? 2 : 1; i + 1 < p.length; i += 2){
+    const k = (tagged ? tag + "." : "") + p[i].trim(), v = p[i+1].trim();
+    if (!p[i].trim()) continue;
+    kv[k] = v;
+    fields.set(k, {v, t: now});
+    const n = Number(v);
+    if (v !== "" && Number.isFinite(n)){
+      let s = series.get(k); if (!s){ s = []; series.set(k, s); addPlotOption(k); }
+      s.push([now, n]); if (s.length > MAX_PTS) s.shift();
+    }
+  }
+  if ("POINTING_ERROR" in kv && "ADCS_MODE" in kv) onAdcsSample({
+    t: now, mode: kv.ADCS_MODE, target: Number(kv.TARGET), e: Number(kv.POINTING_ERROR),
+    rate: Number(kv.GYRO_Z), rw: Number(kv.RW_CMD)
+  });
+  if ("MISSION_STATE" in kv) onMissionStatus(kv);
+  if ("SUN_L" in kv && "SUN_R" in kv) onSunSample(Number(kv.SUN_L), Number(kv.SUN_R), "SUN_ANGLE" in kv ? Number(kv.SUN_ANGLE) : NaN);
+  if ("ADCS_STRATEGY" in kv || "KP" in kv){ refreshTuneReadout(); refreshDerived(); }
+  if (tag === "MOM_PROFILE"){ fwProfiles = true; refreshProfileReadout(); }
+  if ("YAW_REL" in kv || "YAW_REJECTED" in kv) refreshYawReadout();
+  if ("RW_STATE" in kv) refreshProfileReadout();
+  if (kv.PAYLOAD_IP && kv.PAYLOAD_IP !== "0.0.0.0" && !cam.on){ const u = "http://" + kv.PAYLOAD_IP; if (u !== cam.base){ cam.base = u; $("camUrl").value = u; } }
+  dirty = true;
+}
+function onLine(line){
+  addLine(line, "rx");
+  // command/ACK pairing for scripted sequences
+  if (waiter && (line.startsWith("ERR") || line.startsWith("ACK," + waiter.name))){
+    const w = waiter; waiter = null; clearTimeout(w.timer); w.resolve(line);
+  }
+  if (line.startsWith("ACK,ADCS_STRATEGY,")) { fields.set("ADCS_STRATEGY", {v: line.split(",")[2], t: performance.now()}); refreshTuneReadout(); }
+  if (line.startsWith("EVT,RW_MANEUVER_COMPLETE,")) kickEvent("assist_done", Number(line.split(",")[2]));
+  if (line.startsWith("EVT,MOM_BIAS_RECOVERED,")) kickEvent("recovered", Number(line.split(",")[2]));
+  if (line.startsWith("EVT,MISSION_")) onMissionEvent(line.split(","));
+  if (line === "ERR,AUTO_MOMENTUM_PROFILE_NOT_READY" || line === "ERR,ADCS_PREPARE,MOMENTUM_PROFILE_NOT_READY") sys("Momentum profile not ready on the spacecraft — Momentum tab → Send profile.");
+  if (line.startsWith("PAYLOAD,IMAGE_READY,")){ const q = line.split(","); onImageReady(q[2] || "image", Number(q[3]) || 0); }
+  if (line.startsWith("PAYLOAD,ERR,CAPTURE_FAILED")){ onImageReady(null, 0); }
+  { const m = line.match(/^PAYLOAD,(?:RX,)?STREAM_URL,(\S+)/); if (m) camLearnStreamUrl(m[1]); }
+  parseTM(line);
+}
+function onRxText(chunk){
+  rxBuf += chunk;
+  let i;
+  while ((i = rxBuf.indexOf("\n")) >= 0){
+    const line = rxBuf.slice(0, i).replace(/\r$/, "").trim();
+    rxBuf = rxBuf.slice(i + 1);
+    if (line) onLine(line);
+  }
+  if (rxBuf.length > 4096) rxBuf = "";
+}
+
+/* ======================= COMMAND TRANSPORT ========================= */
+let waiter = null;
+let imageWaiters = [];
+function waitImageReady(timeoutMs){
+  return new Promise(res => {
+    const w = {res, timer: setTimeout(() => { imageWaiters = imageWaiters.filter(x => x !== w); res(null); }, timeoutMs)};
+    imageWaiters.push(w);
+  });
+}
+function onImageReady(name, bytes){
+  const ws = imageWaiters; imageWaiters = [];
+  for (const w of ws){ clearTimeout(w.timer); w.res(name ? {name, bytes} : null); }
+  if (name) camOnCaptured(name, bytes);
+}
+let stopEpoch = 0;                       // bumped by STOP; scripted sequences check it after every await
+let cmdChain = Promise.resolve();
+// Send a command and wait for its ACK (or any ERR). Resolves with the reply line, "TIMEOUT" or "ERR,NOT_CONNECTED".
+function cmd(text, wait = true, timeout = 2500){
+  const p = cmdChain.then(() => new Promise(res => {
+    if (!link) return res("ERR,NOT_CONNECTED");
+    noteSent(text); addLine(text, "tx"); link.send(text);
+    if (!wait) return res("SENT");
+    const name = text.split(",")[0];
+    const w = {name, resolve: res};
+    w.timer = setTimeout(() => { if (waiter === w) waiter = null; res("TIMEOUT"); }, timeout);
+    waiter = w;
+  }));
+  cmdChain = p.catch(() => {});
+  return p;
+}
+const isAck = r => typeof r === "string" && r.startsWith("ACK");
+function send(text){                     // free-typed / quick buttons
+  text = text.trim(); if (!text) return;
+  if (!link){ sys("Not connected — connect BLE or USB first."); return; }
+  noteSent(text); addLine(text, "tx"); link.send(text);
+}
+function needLink(msgEl){
+  if (link) return true;
+  if (msgEl) setMsg(msgEl, "Not connected — connect BLE or USB first.", "err");
+  sys("Not connected — connect BLE or USB first.");
+  return false;
+}
+function setMsg(el, text, cls){ el.textContent = text; el.className = "note" + (cls ? " " + cls : ""); }
+
+/* =========================== REFERENCE ============================= */
+// One shared setting for PD tune and Mission.
+//   SUN  target −90…+90°
+//   MAG  heading 0…<360°, errors wrap
+//   YAW  relative yaw from the EKF (firmware Module_YawEKF): −180…+180° from the zero datum, + = rotated right, errors wrap.
+//        The datum is the boot attitude until YAW_ZERO is sent.
+const REFS = {
+  SUN: {min: -90,  max: 90,    ok: a => a >= -90 && a <= 90,    range: "−90…+90°",                      tgt: "Target °",              hdr: "Angle °"},
+  MAG: {min: 0,    max: 359.9, ok: a => a >= 0 && a < 360,      range: "0…359.9° heading",              tgt: "Target heading °",      hdr: "Heading °"},
+  YAW: {min: -180, max: 180,   ok: a => a >= -180 && a <= 180,  range: "−180…+180° from the zero datum", tgt: "Target relative yaw °", hdr: "Relative yaw °"},
+};
+let refSel = store.get("ref", "SUN"); if (!REFS[refSel]) refSel = "SUN";
+const wrap360 = x => ((x % 360) + 360) % 360;
+const wrap180 = x => { x = wrap360(x); return x > 180 ? x - 360 : x; };
+const validAngle = a => Number.isFinite(a) && REFS[refSel].ok(a);
+const rangeText = () => REFS[refSel].range;
+const NO_YAW_FW = "This firmware has no YAW reference. Build and upload the firmware with Module_YawEKF (8 Oct), then try again.";
+function setRef(rf, sendNow, msgEl){
+  refSel = rf; store.set("ref", rf);
+  for (const [id, v] of [["refSun","SUN"],["refMag","MAG"],["refYaw","YAW"],["mRefSun","SUN"],["mRefMag","MAG"],["mRefYaw","YAW"]]) $(id).setAttribute("aria-pressed", rf === v);
+  const t = $("tgt"); t.min = REFS[rf].min; t.max = REFS[rf].max;
+  $("tgtLbl").textContent = REFS[rf].tgt;
+  $("mAngleHdr").textContent = REFS[rf].hdr;
+  for (const el of document.querySelectorAll(".yawOnly")) el.hidden = rf !== "YAW";
+  buildQuickSteps(); refreshYawReadout();
+  seq.uploaded = false; resetStatus(); renderTargets();
+  if (sendNow && link){
+    if (seq.running){ setMsg(msgEl, "A mission is running: the reference applies to the next run.", "warn"); return; }
+    cmd("ADCS_REFERENCE," + rf).then(r => setMsg(msgEl, isAck(r) ? `Reference ${rf}. Targets: ${rangeText()}.` + (rf === "YAW" ? " Press Zero here to make the present attitude 0°." : "") :
+      (r.includes("MANUAL") ? `Selected ${rf}. The spacecraft is in AUTO, so it applies on the next Go / mission (Release first to apply now).` :
+       (rf === "YAW" && r.includes("UNKNOWN") ? NO_YAW_FW : "Reference not changed: " + r)), isAck(r) ? "ok" : "warn"));
+  } else if (sendNow) setMsg(msgEl, `Reference ${rf} selected. Targets: ${rangeText()}. Sent with the next Go / mission.`, "");
+}
+function currentHeading(){
+  // Prefer the controller's own estimate when the spacecraft already runs on MAG, else the raw heading.
+  const ref = fields.get("ADCS_REFERENCE"), est = fields.get("EST_ANGLE"), raw = fields.get("MAG_HEADING"), now = performance.now();
+  if (ref && ref.v === "MAG" && est && now - est.t < 3000) return Number(est.v);
+  if (raw && now - raw.t < 5000) return Number(raw.v);
+  return null;
+}
+function currentYaw(){
+  // YAW_REL comes with the ADCS stream while the spacecraft is on YAW (and with YAW_STATUS at any time).
+  const ref = fields.get("ADCS_REFERENCE"), est = fields.get("EST_ANGLE"), rel = fields.get("YAW_REL"), now = performance.now();
+  if (rel && now - rel.t < 3000) return Number(rel.v);
+  if (ref && ref.v === "YAW" && est && now - est.t < 3000) return Number(est.v);
+  return null;
+}
+function buildQuickSteps(){
+  const box = $("tgtQuick"); box.innerHTML = "";
+  const mag = refSel === "MAG", yaw = refSel === "YAW";
+  $("quickLbl").textContent = mag ? "Quick step from current heading" : (yaw ? "Quick turn from current yaw" : "Quick step");
+  const list = mag ? [-30, -15, 15, 30] : (yaw ? [-90, -30, -15, 15, 30, 90] : [-30, -15, 0, 15, 30]);
+  for (const a of list){
+    const b = document.createElement("button"); b.type = "button"; b.textContent = (a > 0 ? "+" : "") + a;
+    b.addEventListener("click", () => {
+      let t = a;
+      if (mag){
+        const h = currentHeading();
+        if (h === null){ setMsg($("goMsg"), "No current heading yet: send ADCS_REFERENCE,MAG with the ADCS stream on, or TM_STREAM,MAG,ON.", "err"); return; }
+        t = Math.round(wrap360(h + a) * 2) / 2; if (t >= 360) t = 0;
+      } else if (yaw){
+        const h = currentYaw();
+        if (h === null){ setMsg($("goMsg"), "No current yaw yet: press YAW above (sends ADCS_REFERENCE,YAW) with the ADCS stream on, or EKF status.", "err"); return; }
+        t = Math.round(wrap180(h + a) * 2) / 2;
+      }
+      $("tgt").value = t; gains.tgt = t; store.set("gains", gains); goTarget();
+    });
+    box.appendChild(b);
+  }
+}
+/* ---- YAW (EKF) helpers ---- */
+function refreshYawReadout(){
+  const el = $("yawCfg"); if (!el) return;
+  const f = k => fields.has(k) ? fields.get(k).v : "—";
+  const z = fields.has("YAW_ZEROED") ? (fields.get("YAW_ZEROED").v === "1" ? "zeroed" : "boot attitude") : "—";
+  el.innerHTML = `<span>EKF yaw <b>${f("YAW_REL")}</b>°</span><span>1σ <b>${f("YAW_SIGMA")}</b>°</span><span>gyro bias <b>${f("YAW_BIAS")}</b> °/s</span><span>residual <b>${f("YAW_INNOV")}</b>°</span><span>datum <b>${z}</b></span><span>rejected <b>${f("YAW_REJECTED")}</b></span><span>re-acquired <b>${f("YAW_REACQUIRED")}</b></span>`;
+}
+async function yawZero(msgEl){
+  if (!needLink(msgEl)) return;
+  const r = await cmd("YAW_ZERO");
+  if (isAck(r)){
+    setMsg(msgEl, `Zeroed: the attitude the spacecraft is in now is 0° (heading ${r.split(",")[2] ?? "?"}°). YAW targets are angles from here, + = rotated right.`, "ok");
+    seq.uploaded = false;
+    cmd("YAW_STATUS");
+  } else setMsg(msgEl, r.includes("REFUSED") ? "Zero refused: AUTO is flying on YAW. Release (or Abort) first, then zero." :
+      r.includes("NOT_READY") ? "The EKF has no magnetometer sample yet. Check SENSOR_STATUS." :
+      r.includes("UNKNOWN") ? NO_YAW_FW : "Zero failed: " + r, "err");
+}
+async function yawStatus(msgEl){
+  if (!needLink(msgEl)) return;
+  const r = await cmd("YAW_STATUS");
+  if (!isAck(r)){ setMsg(msgEl, r.includes("UNKNOWN") ? NO_YAW_FW : "YAW_STATUS failed: " + r, "err"); return; }
+  await sleep(350);                       // the three TM lines follow the ACK
+  const f = k => fields.has(k) ? fields.get(k).v : "—";
+  const rej = Number(f("YAW_REJECTED")), used = Number(f("YAW_USED")), us = Number(f("EKF_US"));
+  const bad = f("YAW_VALID") !== "1" || (Number.isFinite(rej) && Number.isFinite(used) && rej > 0.05 * (used + rej));
+  setMsg(msgEl, `EKF ${f("YAW_VALID") === "1" ? "valid" : "NOT valid"}: yaw ${f("YAW_REL")}° (1σ ${f("YAW_SIGMA")}°), gyro bias ${f("YAW_BIAS")} °/s, residual rms ${f("YAW_INNOV_RMS")}°, samples used ${f("YAW_USED")} / rejected ${f("YAW_REJECTED")} / re-acquired ${f("YAW_REACQUIRED")}, tilt ${f("TILT_DEG")}°, tilt comp ${f("TILT_COMP")}, step ${Number.isFinite(us) ? us + " µs" : "—"}.` +
+    (bad ? " Many rejected samples: check that the gyro and magnetometer signs agree (turn right by hand: YAW_REL and MAG_HEADING must both rise)." : ""), bad ? "warn" : "ok");
+}
+
+/* ============================ PD TUNE ============================== */
+const gains = store.get("gains", {kp: 2.0, kd: 0.5, bias: 40, band: 2, tgt: 0});
+function bindPair(rangeId, numId, key){
+  const r = $(rangeId), n = $(numId);
+  r.value = n.value = gains[key];
+  r.addEventListener("input", () => { n.value = r.value; gains[key] = Number(r.value); store.set("gains", gains); });
+  n.addEventListener("input", () => { r.value = n.value; gains[key] = Number(n.value); store.set("gains", gains); });
+}
+bindPair("kpR","kp","kp"); bindPair("kdR","kd","kd"); bindPair("biasR","bias","bias");
+$("band").value = gains.band; $("tgt").value = gains.tgt;
+$("band").addEventListener("input", () => { gains.band = Number($("band").value); store.set("gains", gains); });
+$("tgt").addEventListener("input", () => { gains.tgt = Number($("tgt").value); store.set("gains", gains); });
+
+function refreshTuneReadout(){
+  const f = k => fields.has(k) ? fields.get(k).v : "—";
+  $("kpCur").textContent = "craft " + f("KP");
+  $("kdCur").textContent = "craft " + f("KD");
+  $("biasCur").textContent = "craft " + f("MOMENTUM_BIAS");
+  $("craftCfg").innerHTML = `<span>craft ref <b>${f("ADCS_REFERENCE")}</b></span><span>deadband <b>${f("DEADBAND")}</b>°</span><span>max RW <b>${f("MAX_RW_COMMAND")}</b></span><span>sign <b>${f("CONTROL_SIGN")}</b></span>`;
+  const st = fields.has("ADCS_STRATEGY") ? fields.get("ADCS_STRATEGY").v : "";
+  $("stratR").setAttribute("aria-pressed", st === "REACTION"); $("stratM").setAttribute("aria-pressed", st === "MOMENTUM");
+}
+
+$("btnTune").addEventListener("click", async () => {
+  if (!needLink($("tuneMsg"))) return;
+  const kp = Number($("kp").value), kd = Number($("kd").value), b = Math.round(Number($("bias").value));
+  if (!(kp >= 0 && kp <= 20 && kd >= 0 && kd <= 20 && b >= 0 && b <= 100)) { setMsg($("tuneMsg"), "Out of range: Kp and Kd 0–20, bias 0–100.", "err"); return; }
+  const r = await cmd(`ADCS_TUNE,${kp},${kd},${b}`);
+  if (isAck(r)) setMsg($("tuneMsg"), `Applied Kp ${kp}, Kd ${kd}, bias ${b}.`, "ok");
+  else setMsg($("tuneMsg"), "Not applied: " + r, "err");
+});
+async function setStrategy(s){
+  if (!needLink($("tuneMsg"))) return;
+  const r = await cmd("ADCS_STRATEGY," + s);
+  if (isAck(r)) setMsg($("tuneMsg"), "Strategy " + s + ". The wheel was stopped by the change.", "ok");
+  else setMsg($("tuneMsg"), r.includes("MANUAL") ? "Release first: strategy can only change in MANUAL." : "Not changed: " + r, "err");
+}
+$("stratR").addEventListener("click", () => setStrategy("REACTION"));
+$("stratM").addEventListener("click", () => setStrategy("MOMENTUM"));
+$("refSun").addEventListener("click", () => setRef("SUN", true, $("tuneMsg")));
+$("refMag").addEventListener("click", () => setRef("MAG", true, $("tuneMsg")));
+$("mRefSun").addEventListener("click", () => { if (!seq.running) setRef("SUN", true, $("mMsg")); });
+$("mRefMag").addEventListener("click", () => { if (!seq.running) setRef("MAG", true, $("mMsg")); });
+$("refYaw").addEventListener("click", () => setRef("YAW", true, $("tuneMsg")));
+$("mRefYaw").addEventListener("click", () => { if (!seq.running) setRef("YAW", true, $("mMsg")); });
+$("btnYawZero").addEventListener("click", () => yawZero($("goMsg")));
+$("btnYawStatus").addEventListener("click", () => yawStatus($("goMsg")));
+$("mBtnYawZero").addEventListener("click", () => { if (seq.running) setMsg($("mMsg"), "A mission is running. Abort it first, then zero.", "err"); else yawZero($("mMsg")); });
+let goBusy = false;
+async function goTarget(){
+  if (!needLink($("goMsg")) || goBusy) return;
+  if (seq.running){ setMsg($("goMsg"), "A mission is running. Abort it first.", "err"); return; }
+  const a = Number($("tgt").value), band = Number($("band").value);
+  if (!validAngle(a)){ setMsg($("goMsg"), `${refSel} target must be ${rangeText()}.`, "err"); return; }
+  goBusy = true;
+  const ep = stopEpoch, stopped = () => ep !== stopEpoch;
+  try{
+    await cmd("TM_STREAM,ADCS,ON");
+    await cmd("ADCS_MODE,MANUAL");
+    if (stopped()) return;
+    const rr = await cmd("ADCS_REFERENCE," + refSel);
+    if (!isAck(rr)){ setMsg($("goMsg"), refSel === "YAW" && rr.includes("UNKNOWN") ? NO_YAW_FW : `ADCS_REFERENCE,${refSel} refused: ${rr}`, "err"); return; }
+    if (stopped()) return;
+    if (!(await momentumPreflight($("goMsg"), stopped))) return;
+    if (stopped()) return;
+    let r = await cmd("SET_TARGET," + a.toFixed(2));
+    if (stopped()) return;
+    if (!isAck(r)){ setMsg($("goMsg"), "SET_TARGET refused: " + r, "err"); return; }
+    if (stopped()) return;
+    r = await cmd("ADCS_MODE,AUTO");
+    if (!isAck(r)){ setMsg($("goMsg"), "AUTO refused: " + r + (r.includes("SENSOR") ? " (check the GY-89 and LDRs)" : ""), "err"); return; }
+    stepBegin(a, band, "tune");
+    const boot = refSel === "YAW" && fields.has("YAW_ZEROED") && fields.get("YAW_ZEROED").v === "0";
+    setMsg($("goMsg"), `AUTO → ${a}°. Recording step ${steps.length}.` + (boot ? " Note: the datum is still the boot attitude (Zero here was not pressed)." : ""), boot ? "warn" : "ok");
+  } finally { goBusy = false; }
+}
+$("btnGo").addEventListener("click", goTarget);
+$("btnRelease").addEventListener("click", async () => {
+  if (!needLink($("goMsg"))) return;
+  stepEnd();
+  const r = await cmd("RW_STOP");
+  setMsg($("goMsg"), isAck(r) ? "Released: ADCS MANUAL, wheel stopped." : "Release failed: " + r, isAck(r) ? "ok" : "err");
+});
+
+/* --------------------------- step recorder --------------------------- */
+let steps = [], curStep = null;
+const STEP_MAX_MS = 90000;
+function stepBegin(target, tol, src){
+  stepEnd();
+  curStep = {id: steps.length + 1, t0: performance.now(), wall: new Date(), target, tol, src,
+    kp: num("KP") ?? Number($("kp").value), kd: num("KD") ?? Number($("kd").value),
+    bias: strategy() === "MOMENTUM" && fwProfiles ? (num("MOM_PROFILE.BIAS") ?? num("MOMENTUM_BIAS")) : (num("MOMENTUM_BIAS") ?? Number($("bias").value)),
+    strat: fields.has("ADCS_STRATEGY") ? fields.get("ADCS_STRATEGY").v : "—", samples: [], done: false};
+  steps.push(curStep); renderSteps();
+}
+function stepEnd(){ if (curStep){ curStep.done = true; curStep = null; renderSteps(); } }
+function stepMetrics(s){
+  const S = s.samples, m = {};
+  if (!S.length) return m;
+  const tol = s.tol, sec = p => (p.t - s.t0) / 1000;
+  const e0 = S[0].e, sgn = Math.sign(e0) || 1;
+  const maxRw = num("MAX_RW_COMMAND") ?? 80;
+  m.e0 = e0; m.reach = null; m.over = 0; m.peak = 0; let sat = 0, lastOut = -1;
+  S.forEach((p, i) => {
+    if (m.reach === null && Math.abs(p.e) <= tol) m.reach = sec(p);
+    if (p.e * sgn < 0) m.over = Math.max(m.over, -p.e * sgn);
+    if (Math.abs(p.e) > tol) lastOut = i;
+    m.peak = Math.max(m.peak, Math.abs(p.rw));
+    if (Math.abs(p.rw) >= maxRw - 0.5) sat++;
+  });
+  m.sat = s.strat === "MOMENTUM" ? undefined : sat / S.length;
+  const inside = S.slice(lastOut + 1);
+  if (inside.length && sec(S[S.length-1]) - sec(inside[0]) >= 1){
+    m.settled = sec(inside[0]);
+    const es = inside.map(p => p.e), mu = es.reduce((a,b) => a+b, 0) / es.length;
+    m.final = mu; m.sigma = Math.sqrt(es.reduce((a,b) => a + (b-mu)*(b-mu), 0) / es.length);
+  }
+  return m;
+}
+const f1 = (v, d = 1) => v === null || v === undefined || !Number.isFinite(v) ? "—" : v.toFixed(d);
+function renderSteps(){
+  const body = $("stepBody");
+  if (!steps.length){ body.innerHTML = '<tr><td colspan="15" style="text-align:left;color:var(--muted)">No steps yet. Press Go to target with the ADCS stream on.</td></tr>'; return; }
+  body.innerHTML = "";
+  for (const s of steps.slice().reverse()){
+    const m = stepMetrics(s), tr = document.createElement("tr");
+    if (!s.done) tr.className = "live";
+    const cells = [
+      s.id + (s.src === "mission" ? " M" : ""), f1(s.target), f1(s.kp, 2), f1(s.kd, 2), f1(s.bias, 0), (s.strat || "—").slice(0,4),
+      f1(m.e0), m.reach === null || m.reach === undefined ? (s.done ? "never" : "…") : m.reach.toFixed(2) + " s",
+      f1(m.over), m.settled === undefined ? (s.done ? "no" : "…") : m.settled.toFixed(2) + " s",
+      f1(m.final, 2), f1(m.sigma, 2), f1(m.peak, 0), m.sat === undefined ? "—" : Math.round(m.sat * 100) + " %",
+      s.strat === "MOMENTUM" ? String(kicks.list.filter(k => k.step === s.id).length) : "—"];
+    cells.forEach((c, i) => {
+      const td = document.createElement("td"); td.textContent = c;
+      if (i === 9 && m.settled !== undefined) td.className = "good";
+      if (i === 7 && s.done && m.reach === null) td.className = "bad";
+      if (i === 13 && m.sat > 0.3) td.className = "bad";
+      tr.appendChild(td);
+    });
+    body.appendChild(tr);
+  }
+}
+$("btnStepsClear").addEventListener("click", () => { stepEnd(); steps = []; renderSteps(); });
+$("btnStepsCsv").addEventListener("click", () => {
+  const head = "step,source,start_time,target_deg,band_deg,kp,kd,bias,strategy,start_err_deg,reach_s,overshoot_deg,settled_s,final_err_deg,sigma_deg,peak_rw,sat_frac,samples,kicks";
+  const rows = steps.map(s => { const m = stepMetrics(s);
+    return [s.id, s.src, s.wall.toISOString(), s.target, s.tol, s.kp, s.kd, s.bias, s.strat, m.e0, m.reach, m.over, m.settled, m.final, m.sigma, m.peak, m.sat, s.samples.length, kicks.list.filter(k => k.step === s.id).length]
+      .map(v => v === undefined || v === null ? "" : (typeof v === "number" ? +v.toFixed(4) : v)).join(","); });
+  const trace = ["", "step,t_s,err_deg,rate_dps,rw_cmd"].concat(steps.flatMap(s => s.samples.map(p => [s.id, ((p.t - s.t0)/1000).toFixed(3), p.e, p.rate, p.rw].join(","))));
+  download([head].concat(rows, trace).join("\n"), "sunseek_steps_");
+});
+
+/* ============================ MISSION ============================== */
+// This file keeps its own target list ("missionAngle"); the first time it copies the other console's list.
+let mRows = store.get("missionAngle", null) || store.get("mission", [{a: 20, tol: 3, hold: 5}, {a: -20, tol: 3, hold: 5}, {a: 0, tol: 3, hold: 5}]);
+for (const r of mRows){ if (r.cap === undefined) r.cap = true; if (!Number.isFinite(r.off)) r.off = 0; delete r.image; }   // cap: take a picture at this target; off: offset added to the target
+
+/* ---------- final angle, error, next set angle (telemetry only, no picture) ---------- */
+// set angle = target + offset: this is what is sent to the spacecraft (MISSION_TARGET / SET_TARGET).
+const normAngle = x => refSel === "MAG" ? (wrap360(x) >= 359.995 ? 0 : wrap360(x)) : refSel === "YAW" ? wrap180(x) : x;
+const setOf = r => Math.round(normAngle(Number(r.a) + (Number(r.off) || 0)) * 100) / 100;
+const fmtSigned = (v, d = 1) => (v >= 0 ? "+" : "-") + Math.abs(v).toFixed(d);
+const fin = {buf: [], res: [], set: [], want: [], heldAt: [], heldErr: [], undo: null};
+function finClear(){ fin.res = []; fin.set = []; fin.want = []; fin.heldAt = []; fin.heldErr = []; }
+function finBegin(){ finClear(); fin.set = mRows.map(setOf); fin.want = mRows.map(r => Number(r.a)); setMsg($("finMsg"), ""); }
+function finSample(p){ fin.buf.push(p); while (fin.buf.length && p.t - fin.buf[0].t > 30000) fin.buf.shift(); }
+// errs: POINTING_ERROR samples = set angle − angle. Pure arithmetic, used by the test as well.
+function finCompute(set, want, errs){
+  const m = errs.reduce((a, b) => a + b, 0) / errs.length, wrap = refSel !== "SUN";
+  const final = normAngle(set - m);
+  const err = wrap ? wrap180(final - want) : final - want;
+  const next = Math.round(normAngle(set - err) * 10) / 10;
+  const off = Math.round((wrap ? wrap180(next - want) : next - want) * 10) / 10;
+  return {final, err, next, off, spread: errs.length > 1 ? (Math.max(...errs) - Math.min(...errs)) / 2 : 0};
+}
+function finHeld(i, err){ if (!mRows[i] || fin.set[i] === undefined) return; fin.heldAt[i] = performance.now(); fin.heldErr[i] = Number(err); }
+// Called when target i is finished (picture saved, capture skipped or failed).
+function finTake(i){
+  if (!mRows[i] || fin.set[i] === undefined) return;
+  const now = performance.now(), t0 = (fin.heldAt[i] !== undefined ? fin.heldAt[i] : now) - 1000;
+  const errs = fin.buf.filter(p => p.t >= t0 && p.t <= now && p.mode === "AUTO" && Math.abs(p.target - fin.set[i]) < 0.011 && Number.isFinite(p.e)).map(p => p.e);
+  if (errs.length) fin.res[i] = Object.assign(finCompute(fin.set[i], fin.want[i], errs), {n: errs.length, src: "telemetry"});
+  else if (Number.isFinite(fin.heldErr[i])) fin.res[i] = Object.assign(finCompute(fin.set[i], fin.want[i], [fin.heldErr[i]]), {n: 0, src: "held"});
+  else fin.res[i] = {none: true};
+  renderTargets(); finSummary();
+}
+function finCell(i){
+  const z = fin.res[i]; if (!z) return null;
+  if (z.none) return {a: "no angle telemetry", cls: "bad", title: "No ADCS telemetry for this target while it was held. The ADCS stream must be on."};
+  const sameSet = Math.abs(z.next - fin.set[i]) < 0.05;
+  return {a: `final ${z.final.toFixed(1)} · error ${fmtSigned(z.err)}`, b: sameSet ? "next set: same" : `→ next set ${z.next}`, cls: Math.abs(z.err) < 0.5 ? "ok" : "act",
+    title: (z.src === "telemetry" ? `Average of ${z.n} telemetry sample(s), spread ±${z.spread.toFixed(2)}°.` : "From the spacecraft's own value at hold complete (no stream samples).") +
+      (Number.isFinite(fin.heldErr[i]) ? ` On board at hold complete: angle ${normAngle(fin.set[i] - fin.heldErr[i]).toFixed(2)}.` : "") + ` Set angle in this run: ${fin.set[i]}. Target: ${fin.want[i]}.`};
+}
+function finSummary(){
+  const done = fin.res.filter(z => z && !z.none);
+  if (!fin.res.some(z => z)) return;
+  const worst = done.reduce((a, z) => Math.max(a, Math.abs(z.err)), 0);
+  setMsg($("finMsg"), done.length ? `Final angle read for ${done.length} target(s); largest error ${worst.toFixed(1)}°.` + (seq.running ? "" : " Apply next angles stores the correction as offsets; then Upload again.") : "No angle telemetry was received for the targets.", done.length ? "ok" : "warn");
+}
+function finApply(){
+  if (seq.running) return;
+  const before = mRows.map(r => r.off || 0), ch = [];
+  mRows.forEach((r, i) => { const z = fin.res[i]; if (!z || z.none || Number(r.a) !== fin.want[i]) return;
+    if (Math.abs(z.off) > 30){ ch.push(`target ${i + 1}: offset ${z.off} is too large, not applied`); return; }
+    if (z.off === (r.off || 0)) return;
+    const old = setOf(r); r.off = z.off; ch.push(`target ${i + 1}: set ${old} → ${setOf(r)} (offset ${fmtSigned(r.off)})`); });
+  if (!ch.length){ setMsg($("finMsg"), fin.res.some(z => z && !z.none) ? "Nothing to change: the offsets already give the next set angles." : "Nothing to apply: run a mission first.", "warn"); return; }
+  fin.undo = before; store.set("missionAngle", mRows); seq.uploaded = false; renderTargets();
+  setMsg($("finMsg"), "Changed " + ch.join("; ") + ". Upload again before the next mission.", "ok");
+}
+function finUndo(){
+  if (seq.running || !fin.undo) return;
+  fin.undo.forEach((o, i) => { if (mRows[i]) mRows[i].off = o; }); fin.undo = null; store.set("missionAngle", mRows); seq.uploaded = false; renderTargets();
+  setMsg($("finMsg"), "Offsets put back.", "");
+}
+function finClearOffsets(){
+  if (seq.running) return;
+  fin.undo = mRows.map(r => r.off || 0); for (const r of mRows) r.off = 0; store.set("missionAngle", mRows); seq.uploaded = false; renderTargets();
+  setMsg($("finMsg"), "All offsets are 0: set angle = target.", "");
+}
+$("btnFinApply").addEventListener("click", finApply);
+$("btnFinUndo").addEventListener("click", finUndo);
+$("btnFinClear").addEventListener("click", finClearOffsets);
+let runBy = store.get("runBy", "craft");
+const seq = {running: false, mode: "craft", idx: 0, phase: "", holdStart: null, t0: 0, maxMs: 0, status: [], poll: null, ignoreBefore: 0, timeLimit: false, uploaded: false, advance: false, capSince: 0};
+
+for (const m of MAX_LIST){ const o = document.createElement("option"); o.value = m; o.textContent = m + " min"; $("maxMin").appendChild(o); }
+$("maxMin").value = store.get("maxMin", 5);
+$("maxMin").addEventListener("change", () => { store.set("maxMin", Number($("maxMin").value)); seq.uploaded = false; });
+
+function setRunBy(m){
+  if (seq.running) return;
+  runBy = m; store.set("runBy", m);
+  $("runCraft").setAttribute("aria-pressed", m === "craft"); $("runConsole").setAttribute("aria-pressed", m === "console");
+  document.querySelectorAll(".craftOnly").forEach(e => e.hidden = m !== "craft");
+  document.querySelectorAll(".consoleOnly").forEach(e => e.hidden = m !== "console");
+  $("runNote").innerHTML = m === "craft"
+    ? "The spacecraft runs the targets itself (competition path): <b>Upload &amp; prepare</b>, then <b>Start</b>. The spacecraft takes a picture at the targets ticked under <b>Capture</b> (CAPTURE → IMAGE_READY) and moves on by itself; COMPLETE keeps holding the last target. Leaving a target unticked needs the firmware with the capture choice (8 Oct evening); older firmware captures at every target. The organisers' stock firmware completes <b>target 1 only</b> and stays in CAPTURING."
+    : "The console sends each target (<code>SET_TARGET</code> + AUTO), times the hold from <code>POINTING_ERROR</code> telemetry, sends <code>CAPTURE</code> at the targets ticked under <b>Capture</b>, and moves on. Use it for multi-target tests with the current firmware. Hold timing has ±0.25 s resolution.";
+  $("runNote").innerHTML += " In MOMENTUM (v3.0) the console first checks the spacecraft has the momentum profile (and re-sends it if needed), then spins the wheel up with <code>ADCS_PREPARE</code> and waits before starting.";
+  resetStatus(); renderTargets();
+}
+$("runCraft").addEventListener("click", () => setRunBy("craft"));
+$("runConsole").addEventListener("click", () => setRunBy("console"));
+$("optRelease").checked = store.get("optRelease", true);
+$("capAll").addEventListener("change", () => { if (seq.running) return; const on = $("capAll").checked; for (const r of mRows) r.cap = on; store.set("missionAngle", mRows); seq.uploaded = false; renderTargets(); });
+$("optRelease").addEventListener("change", () => store.set("optRelease", $("optRelease").checked));
+
+function resetStatus(){ seq.status = mRows.map(() => ({s: "pending", txt: "pending", frac: 0})); }
+function validRow(r){ return validAngle(r.a) && Number.isFinite(r.off) && Math.abs(r.off) <= 30 && validAngle(setOf(r)) && r.tol > 0 && r.tol <= 30 && r.hold >= 0 && r.hold <= 60; }
+function renderTargets(){
+  const body = $("tgtBody"); body.innerHTML = "";
+  mRows.forEach((r, i) => {
+    const st = seq.status[i] || {s: "pending", txt: "pending", frac: 0};
+    const tr = document.createElement("tr");
+    const mk = (key, min, max, step) => {
+      const inp = document.createElement("input"); inp.type = "number"; inp.min = min; inp.max = max; inp.step = step; inp.value = r[key];
+      inp.disabled = seq.running; inp.setAttribute("aria-label", `Target ${i+1} ${key}`);
+      inp.addEventListener("input", () => { r[key] = Number(inp.value); store.set("missionAngle", mRows); seq.uploaded = false; inp.style.borderColor = validRow(r) ? "" : "var(--bad)";
+        if (key === "a" || key === "off"){ if (key === "a" && fin.res[i]){ fin.res[i] = undefined; tdF.innerHTML = ""; } setHint(); } });
+      if (!validRow(r)) inp.style.borderColor = "var(--bad)";
+      const td = document.createElement("td"); td.appendChild(inp); return td;
+    };
+    const tdN = document.createElement("td"); tdN.textContent = i + 1;
+    const tdF = document.createElement("td"); tdF.style.whiteSpace = "normal";
+    { const c = finCell(i); if (c) for (const t of [c.a, c.b]){ if (!t) continue; if (tdF.firstChild) tdF.appendChild(document.createTextNode(" ")); const sp = document.createElement("span"); sp.className = "chip " + c.cls; sp.style.whiteSpace = "nowrap"; sp.textContent = t; sp.title = c.title; tdF.appendChild(sp); } }
+    const hint = document.createElement("span"); hint.className = "cfg"; hint.style.display = "block";
+    const setHint = () => { hint.textContent = r.off ? (validRow(r) ? "set " + setOf(r) : "out of range") : ""; };
+    const tdS = document.createElement("td");
+    const cls = {pending: "", acquiring: "act", holding: "act", commanding: "act", capturing: "act", done: "ok", failed: "bad", stopped: "bad"}[st.s] || "";
+    tdS.innerHTML = `<span class="chip ${cls}"></span>` + (st.s === "holding" ? `<span class="bar"><i style="width:${Math.min(100, st.frac*100).toFixed(0)}%"></i></span>` : "");
+    tdS.firstChild.textContent = st.txt;
+    const tdC = document.createElement("td");
+    const cb = document.createElement("input"); cb.type = "checkbox"; cb.checked = r.cap !== false; cb.disabled = seq.running; cb.setAttribute("aria-label", `Target ${i+1} capture`);
+    cb.addEventListener("change", () => { r.cap = cb.checked; store.set("missionAngle", mRows); seq.uploaded = false; $("capAll").checked = mRows.every(q => q.cap !== false); });
+    tdC.appendChild(cb);
+    const tdX = document.createElement("td");
+    const x = document.createElement("button"); x.type = "button"; x.className = "x"; x.textContent = "×"; x.title = "Remove target"; x.disabled = seq.running || mRows.length <= 1;
+    x.addEventListener("click", () => { mRows.splice(i, 1); store.set("missionAngle", mRows); seq.uploaded = false; finClear(); resetStatus(); renderTargets(); });
+    tdX.appendChild(x);
+    const tdO = mk("off", -30, 30, 0.1); tdO.appendChild(hint); setHint();
+    tr.append(tdN, mk("a", REFS[refSel].min, REFS[refSel].max, 0.5), tdO, mk("tol", 0.5, 30, 0.5), mk("hold", 0, 60, 0.5), tdC, tdS, tdF, tdX);
+    body.appendChild(tr);
+  });
+  $("btnAddTgt").disabled = seq.running || mRows.length >= 10;
+  $("btnUpload").disabled = seq.running; $("btnMReset").disabled = seq.running && runBy === "console";
+  $("btnMStart").disabled = seq.running; $("btnMAbort").disabled = !seq.running && runBy === "console";
+  $("runCraft").disabled = $("runConsole").disabled = seq.running; $("maxMin").disabled = seq.running;
+  $("capAll").checked = mRows.length > 0 && mRows.every(q => q.cap !== false); $("capAll").disabled = seq.running;
+  $("mBtnView").disabled = seq.running;      // competition rule: no pictures until the mission is complete
+  $("btnFinApply").disabled = $("btnFinClear").disabled = seq.running; $("btnFinUndo").disabled = seq.running || !fin.undo;
+}
+$("btnAddTgt").addEventListener("click", () => {
+  if (mRows.length >= 10) return;
+  const last = mRows[mRows.length - 1] || {a: 0, tol: 3, hold: 5};
+  mRows.push({a: 0, off: 0, tol: last.tol, hold: last.hold, cap: last.cap !== false}); store.set("missionAngle", mRows); seq.uploaded = false; finClear(); resetStatus(); renderTargets();
+});
+function checkRows(){
+  const bad = mRows.findIndex(r => !validRow(r));
+  if (bad >= 0){ setMsg($("mMsg"), `Target ${bad+1} is invalid for ${refSel}: angle ${rangeText()} (also target + offset), offset −30…+30, tolerance 0.5…30, hold 0…60 s.`, "err"); return false; }
+  return true;
+}
+function setStatus(i, s, txt, frac = 0){ if (seq.status[i]) { seq.status[i] = {s, txt, frac}; renderTargets(); } }
+function setMissionChip(text, cls){ const c = $("chipMission"); c.textContent = "MISSION " + text; c.className = "state " + (cls || ""); }
+
+/* ---------- spacecraft-run mission (firmware MISSION_* state machine) ---------- */
+async function craftUpload(){
+  if (!needLink($("mMsg")) || !checkRows()) return false;
+  setMsg($("mMsg"), "Uploading…");
+  // MISSION_TARGET,<angle>,<tol>,<hold>,<capture 0|1>: the 4th field needs the firmware of 8 Oct (evening) or later.
+  // Older firmware answers ERR,MISSION_TARGET_INVALID and always captures, so the 3-field form is only right when every box is ticked.
+  const list = ["MISSION_RESET", "ADCS_REFERENCE," + refSel, "MISSION_CLEAR",
+    ...mRows.map(r => `MISSION_TARGET,${setOf(r)},${r.tol},${r.hold},${r.cap !== false ? 1 : 0}`), "MISSION_MAX_MIN," + $("maxMin").value, "MISSION_PREPARE"];
+  const ep = stopEpoch; let oldFw = false, k = 0;
+  for (const c of list){
+    if (ep !== stopEpoch){ setMsg($("mMsg"), "Upload stopped by STOP.", "err"); seq.uploaded = false; return false; }
+    let sent = c; const row = c.startsWith("MISSION_TARGET,") ? mRows[k++] : null;
+    if (row && oldFw) sent = `MISSION_TARGET,${setOf(row)},${row.tol},${row.hold}`;
+    let r = await cmd(sent);
+    if (row && !oldFw && r === "ERR,MISSION_TARGET_INVALID" && validRow(row)){
+      if (mRows.some(q => q.cap === false)){
+        setMsg($("mMsg"), "This firmware cannot skip a capture: it takes a picture at every target. Upload the firmware with the capture choice (8 Oct evening build), or tick Capture on every target, or use Console step-through.", "err");
+        seq.uploaded = false; return false;
+      }
+      oldFw = true; sent = `MISSION_TARGET,${setOf(row)},${row.tol},${row.hold}`; r = await cmd(sent);
+    }
+    if (!isAck(r)){ setMsg($("mMsg"), `Upload stopped at ${sent}: ${r}`, "err"); seq.uploaded = false; return false; }
+  }
+  seq.uploaded = true; resetStatus(); renderTargets(); setMissionChip("READY", "on");
+  const nCap = mRows.filter(q => q.cap !== false).length;
+  setMsg($("mMsg"), `Uploaded ${mRows.length} target(s), reference ${refSel}, capture at ${nCap === mRows.length ? "every target" : nCap === 0 ? "no target" : "target " + mRows.map((q, i) => q.cap !== false ? i + 1 : 0).filter(Boolean).join(", ")}. Spacecraft is READY. Press Start.` + (mRows.some(q => q.off) ? " Set angles (target + offset): " + mRows.map(setOf).join(", ") + "." : "") + (refSel === "YAW" ? " Angles are measured from the zero datum (Zero here)." : "") + (oldFw ? " (Older firmware: it captures at every target.)" : ""), "ok");
+  return true;
+}
+async function craftStart(){
+  if (!needLink($("mMsg"))) return;
+  if (!seq.uploaded && !(await craftUpload())) return;
+  const ep = stopEpoch;
+  await cmd("TM_STREAM,ADCS,ON");
+  if (!(await momentumPreflight($("mMsg"), () => ep !== stopEpoch))) return;
+  // If ADCS is already AUTO, v2.1 never pushes the mission target and would judge the hold against the old one.
+  await cmd("ADCS_MODE,MANUAL");
+  if (ep !== stopEpoch) return;
+  const r = await cmd("MISSION_START");
+  if (!isAck(r)){ setMsg($("mMsg"), "Start refused: " + r + " — press Upload & prepare again.", "err"); seq.uploaded = false; return; }
+  Object.assign(seq, {running: true, mode: "craft", idx: 0, holdStart: null, t0: performance.now(), maxMs: Number($("maxMin").value) * 60000, timeLimit: false, uploaded: false, advance: false, capSince: 0});
+  finBegin(); resetStatus(); setStatus(0, "acquiring", "acquiring");
+  stepBegin(setOf(mRows[0]), mRows[0].tol, "mission");
+  setMsg($("mMsg"), "Mission running on the spacecraft.", "");
+  clearInterval(seq.poll); seq.poll = setInterval(() => { if (link && seq.running) cmd("MISSION_STATUS", false); }, 1000);
+  renderTargets();
+}
+function onMissionStatus(kv){
+  const st = kv.MISSION_STATE, idx = Math.max(0, (Number(kv.TARGET_INDEX) || 1) - 1);
+  if (!(seq.running && seq.mode === "console")) setMissionChip(st, {READY: "on", ACQUIRING: "act", HOLDING: "act", CAPTURING: "act", COMPLETE: "on", ABORTED: "err", FAILED: "err", TIME_LIMIT_REACHED: "err"}[st]);
+  if (!(seq.running && seq.mode === "craft")) return;
+  if (idx !== seq.idx && idx < mRows.length){
+    for (let i = seq.idx; i < idx; i++) if (seq.status[i].s !== "done") setStatus(i, "done", "done");
+    seq.idx = idx; seq.holdStart = null; stepBegin(setOf(mRows[idx]), mRows[idx].tol, "mission");
+  }
+  const el = ((performance.now() - seq.t0) / 1000).toFixed(1);
+  if (kv.MISSION_ADVANCE === "1") seq.advance = true;          // v3.0-pio firmware: capture + next target on board
+  if (st === "ACQUIRING" || st === "HOLDING"){ seq.capSince = 0; const cur = seq.status[seq.idx]; if (cur && cur.s !== "done" && cur.s !== st.toLowerCase()) setStatus(seq.idx, st.toLowerCase(), st.toLowerCase()); }
+  if (st === "CAPTURING" || st === "IMAGE_READY"){
+    if (!seq.capSince) seq.capSince = performance.now();
+    if (fin.heldAt[seq.idx] === undefined && !fin.res[seq.idx]){ fin.heldAt[seq.idx] = performance.now(); finTake(seq.idx); }
+    const last = seq.idx + 1 >= mRows.length;
+    if (seq.advance || last){
+      const cur = seq.status[seq.idx];
+      const wantCap = !mRows[seq.idx] || mRows[seq.idx].cap !== false;
+      if (cur && cur.s !== "done") setStatus(seq.idx, st === "CAPTURING" && wantCap ? "capturing" : "done", st === "CAPTURING" && wantCap ? `held ${el} s · capturing…` : `hold done ${el} s` + (wantCap ? "" : " · no capture"));
+      if (last && st === "CAPTURING" && !seq.advance) setMsg($("mMsg"), `Last target held in ${el} s. Firmware is CAPTURING; it keeps holding this target.`, "ok");
+    } else if (performance.now() - seq.capSince > 20000){
+      // organisers' firmware never leaves CAPTURING
+      setStatus(seq.idx, "done", `hold done ${el} s`);
+      const rest = seq.idx + 2 === mRows.length ? `Target ${mRows.length} needs` : `Targets ${seq.idx+2}–${mRows.length} need`;
+      setMsg($("mMsg"), `Target ${seq.idx+1} held, but the spacecraft stayed in CAPTURING for 20 s: this is the organisers' firmware, which stops there. ${rest} the v3.0-pio mission advance (Module_Mission.h in the PlatformIO port). Use Abort to finish, or switch to Console step-through.`, "warn");
+      craftFinish(false);
+    } else setStatus(seq.idx, "capturing", `held ${el} s · capturing…`);
+  } else if (st === "COMPLETE"){ for (let i = 0; i <= seq.idx; i++) if (seq.status[i] && seq.status[i].s !== "done") setStatus(i, "done", "done"); setMsg($("mMsg"), `Mission COMPLETE in ${el} s${kv.IMAGES !== undefined ? `, ${kv.IMAGES} image(s)` : ""}. The spacecraft keeps holding the last target in AUTO — press Release/Abort when the judges are done. Pictures: Payload tab.`, "ok"); craftFinish(true); }
+  else if (st === "FAILED"){ setStatus(seq.idx, "failed", "failed"); setMsg($("mMsg"), "Mission FAILED: the spacecraft could not enter AUTO (sensor read failed, or target out of range).", "err"); craftFinish(true); }
+  else if (st === "ABORTED"){ setMsg($("mMsg"), "Mission aborted. Wheel stopped.", "err"); craftFinish(true); }
+  else if (st === "TIME_LIMIT_REACHED"){ setStatus(seq.idx, "stopped", "time limit"); setMsg($("mMsg"), "TIME LIMIT reached. The firmware does NOT stop the wheel: press Abort or STOP.", "err"); craftFinish(false); }
+  else if (st === "IDLE"){ craftFinish(true); }
+}
+// v3.0-pio firmware events: EVT,MISSION_STATE,<st>,<i> · MISSION_TARGET_HELD,<i>,<err> · MISSION_CAPTURE,<i>,<n> · MISSION_IMAGE,<i>,<name>,<bytes> · MISSION_CAPTURE_FAILED,<i> · MISSION_NEXT_TARGET,<i>,<deg> · MISSION_COMPLETE,<imgs>,<s>
+function onMissionEvent(q){
+  const ev = q[1], i = Math.max(0, (Number(q[2]) || 1) - 1);
+  if (ev === "MISSION_STATE" || ev === "MISSION_IMAGE" || ev === "MISSION_CAPTURE" || ev === "MISSION_CAPTURE_SKIPPED" || ev === "MISSION_NEXT_TARGET" || ev === "MISSION_TARGET_HELD" || ev === "MISSION_CAPTURE_FAILED" || ev === "MISSION_COMPLETE") seq.advance = true;
+  const mine = seq.running && seq.mode === "craft";
+  if (ev === "MISSION_TARGET_HELD" && mine) finHeld(i, q[3]);
+  if (ev === "MISSION_IMAGE" && mRows[i]){ if (mine){ setStatus(i, "done", `done · ${q[3]}`); finTake(i); } }
+  if (ev === "MISSION_CAPTURE_SKIPPED" && mine && seq.status[i]){ setStatus(i, "done", "done · no capture"); finTake(i); }
+  if (ev === "MISSION_CAPTURE_FAILED" && mine && seq.status[i]){ setStatus(i, "done", "done · capture FAILED"); finTake(i); }
+}
+function craftFinish(endStep){ seq.running = false; clearInterval(seq.poll); seq.poll = null; if (endStep) stepEnd(); renderTargets(); }
+
+/* ---------- console step-through mission ---------- */
+async function consoleStart(){
+  if (!needLink($("mMsg")) || !checkRows()) return;
+  Object.assign(seq, {running: true, mode: "console", idx: 0, t0: performance.now(), maxMs: Number($("maxMin").value) * 60000, timeLimit: false});
+  finBegin(); resetStatus(); renderTargets(); setMissionChip("CONSOLE RUN", "act");
+  setMsg($("mMsg"), "Preparing…");
+  await cmd("TM_STREAM,ADCS,ON");
+  await cmd("ADCS_MODE,MANUAL");
+  const r = await cmd("ADCS_REFERENCE," + refSel);
+  if (!seq.running) return;
+  if (!isAck(r)) return consoleFail(`Reference ${refSel} refused: ` + r);
+  if (!(await momentumPreflight($("mMsg"), () => !seq.running))) return consoleFail("Momentum pre-flight failed (see above).");
+  if (!seq.running) return;
+  seq.t0 = performance.now();
+  consoleGoto(0);
+}
+async function consoleGoto(i){
+  if (!seq.running) return;
+  seq.idx = i; seq.holdStart = null; seq.phase = "commanding";
+  const t = mRows[i];
+  setStatus(i, "commanding", "sending…");
+  await cmd("ADCS_MODE,MANUAL");
+  if (!seq.running) return;
+  let r = await cmd("SET_TARGET," + setOf(t).toFixed(2));
+  if (!seq.running) return;
+  if (!isAck(r)) return consoleFail(`Target ${i+1}: SET_TARGET refused (${r}).`);
+  r = await cmd("ADCS_MODE,AUTO");
+  if (!seq.running) return;
+  if (!isAck(r)) return consoleFail(`Target ${i+1}: AUTO refused (${r}).`);
+  seq.ignoreBefore = performance.now();
+  stepBegin(setOf(t), t.tol, "mission");
+  seq.phase = "acquiring"; setStatus(i, "acquiring", "acquiring");
+  setMsg($("mMsg"), `Target ${i+1}/${mRows.length}: ${t.a}°` + (t.off ? ` (set ${setOf(t)}°)` : "") + ` ±${t.tol}°, hold ${t.hold} s.`);
+}
+function consoleSample(p){
+  if (!seq.running || seq.mode !== "console") return;
+  if (seq.phase !== "acquiring" && seq.phase !== "holding") return;
+  if (p.t < seq.ignoreBefore) return;
+  const t = mRows[seq.idx];
+  if (Math.abs(p.target - setOf(t)) > 0.011) return;         // packet from before SET_TARGET took effect
+  if (p.mode !== "AUTO") return consoleFail(`ADCS dropped to ${p.mode} on target ${seq.idx+1}: sensor read failure, or someone sent a command.`);
+  if (Math.abs(p.e) <= t.tol){
+    if (seq.holdStart === null){ seq.holdStart = p.t; seq.phase = "holding"; }
+    const held = (p.t - seq.holdStart) / 1000;
+    if (held >= t.hold) return consoleTargetDone();
+    setStatus(seq.idx, "holding", `holding ${held.toFixed(1)}/${t.hold} s`, t.hold ? held / t.hold : 1);
+  } else if (seq.holdStart !== null){
+    seq.holdStart = null; seq.phase = "acquiring"; setStatus(seq.idx, "acquiring", "drifted out, re-acquiring");
+  }
+}
+async function consoleTargetDone(){
+  const i = seq.idx, el = ((performance.now() - seq.t0) / 1000).toFixed(1);
+  seq.phase = "capturing"; fin.heldAt[i] = performance.now();
+  if (mRows[i].cap !== false){
+    setStatus(i, "capturing", "capturing…");
+    const img = waitImageReady(15000);
+    await cmd("CAPTURE");
+    const got = await img;
+    if (!seq.running) return;
+    setStatus(i, "done", got ? `done ${el} s · ${got.name}` : `done ${el} s · no image (15 s)`);
+  } else setStatus(i, "done", `done ${el} s · no capture`);
+  finTake(i);
+  if (i + 1 < mRows.length) consoleGoto(i + 1);
+  else consoleFinish(`All ${mRows.length} target(s) done in ${((performance.now() - seq.t0)/1000).toFixed(1)} s.`, "ok");
+}
+async function consoleFinish(text, cls){
+  seq.running = false; seq.phase = ""; stepEnd();
+  setMissionChip(cls === "ok" ? "COMPLETE" : "STOPPED", cls === "ok" ? "on" : "err");
+  if ($("optRelease").checked && link){ await cmd("RW_STOP"); text += " Wheel released."; }
+  else text += " Spacecraft still in AUTO, holding the last target.";
+  setMsg($("mMsg"), text, cls); renderTargets();
+}
+function consoleFail(text){
+  if (!seq.running) return;
+  setStatus(seq.idx, "failed", "failed");
+  consoleFinish(text, "err");
+}
+
+/* ---------- buttons + ticker ---------- */
+$("btnUpload").addEventListener("click", craftUpload);
+$("btnMStart").addEventListener("click", () => runBy === "craft" ? craftStart() : consoleStart());
+$("btnMAbort").addEventListener("click", async () => {
+  if (seq.running && seq.mode === "console"){ seq.running = false; stepEnd(); setStatus(seq.idx, "stopped", "aborted"); setMissionChip("ABORTED", "err"); await cmd("RW_STOP"); setMsg($("mMsg"), "Aborted. Wheel stopped.", "err"); renderTargets(); return; }
+  if (!needLink($("mMsg"))) return;
+  const r = await cmd("MISSION_ABORT");
+  craftFinish(true); setMissionChip("ABORTED", "err");
+  setMsg($("mMsg"), isAck(r) ? "MISSION_ABORT sent: ADCS MANUAL, wheel stopped." : "Abort: " + r, isAck(r) ? "" : "err");
+});
+$("btnMReset").addEventListener("click", async () => {
+  if (!needLink($("mMsg"))) return;
+  const r = await cmd("MISSION_RESET"); craftFinish(true); seq.uploaded = false; resetStatus(); renderTargets();
+  setMissionChip("IDLE"); setMsg($("mMsg"), isAck(r) ? "Mission reset to IDLE (wheel stopped)." : "Reset: " + r, isAck(r) ? "" : "err");
+});
+setInterval(() => {
+  if (!seq.running){ return; }
+  const el = (performance.now() - seq.t0) / 1000;
+  const lastAdcs = fields.get("POINTING_ERROR");
+  const stale = !lastAdcs || performance.now() - lastAdcs.t > 1500;
+  $("mElapsed").innerHTML = `elapsed <b>${el.toFixed(1)} s</b> / ${$("maxMin").value} min` + (stale ? ' · <span style="color:var(--bad)">no ADCS telemetry</span>' : "");
+  if (seq.mode === "craft" && seq.status[seq.idx] && seq.status[seq.idx].s !== "done" && seq.status[seq.idx].s !== "capturing"){
+    // local hold estimate for display only; the spacecraft decides
+    const t = mRows[seq.idx], e = num("POINTING_ERROR");
+    if (e !== null && Math.abs(e) <= t.tol){
+      if (seq.holdStart === null) seq.holdStart = performance.now();
+      const held = (performance.now() - seq.holdStart) / 1000;
+      setStatus(seq.idx, "holding", `holding ~${Math.min(held, t.hold).toFixed(1)}/${t.hold} s`, t.hold ? held / t.hold : 1);
+    } else if (e !== null){ seq.holdStart = null; setStatus(seq.idx, "acquiring", "acquiring"); }
+  }
+  if (seq.mode === "console" && !seq.timeLimit && el * 1000 >= seq.maxMs){
+    seq.timeLimit = true; setStatus(seq.idx, "stopped", "time limit");
+    consoleFinish("Max duration reached.", "err");
+  }
+}, 250);
+
+/* ===================== MOMENTUM PROFILE (v3.0) ===================== */
+let fwProfiles = null;        // true = v3.0 profile firmware, false = v2.1 (no profiles), null = unknown
+let lastWheelStopT = 0;       // when we last sent something that stops the wheel
+const strategy = () => fields.has("ADCS_STRATEGY") ? fields.get("ADCS_STRATEGY").v : "";
+function noteSent(text){ if (/^(MISSION_RESET|RW_STOP|STOP|ADCS_STRATEGY,)/.test(text)) lastWheelStopT = performance.now(); }
+// Placeholder values only: characterise on the real rig.
+const mp = store.get("momProfile", {bias: 40, cwD: 15, cwA: 100, cwM: 200, ccwD: -15, ccwA: -60, ccwM: 150, recS: 1, recM: 40, trig: 8});
+const MP_IN = {mpBias: "bias", mpCwD: "cwD", mpCwA: "cwA", mpCwM: "cwM", mpCcwD: "ccwD", mpCcwA: "ccwA", mpCcwM: "ccwM", mpRecS: "recS", mpRecM: "recM", mpTrig: "trig"};
+function profileErrors(m){
+  const e = [], int = v => Number.isInteger(v);
+  if (!(int(m.bias) && m.bias >= 0 && m.bias <= 100)) e.push("bias 0–100");
+  if (!(int(m.cwD) && m.cwD >= 1 && m.cwD <= 100)) e.push("CW delta 1–100");
+  if (!(int(m.ccwD) && m.ccwD <= -1 && m.ccwD >= -100)) e.push("CCW delta −100…−1");
+  for (const [k, n] of [["cwA","CW assist"],["ccwA","CCW assist"]]) if (!(int(m[k]) && m[k] >= -100 && m[k] <= 100)) e.push(n + " −100…100");
+  for (const [k, n] of [["cwM","CW ms"],["ccwM","CCW ms"]]) if (!(m[k] >= 0 && m[k] <= 10000)) e.push(n + " 0–10000");
+  if (!(int(m.recS) && m.recS >= 1 && m.recS <= 100)) e.push("recovery step 1–100");
+  if (!(m.recM >= 10 && m.recM <= 10000)) e.push("recovery ms 10–10000");
+  if (!(m.trig >= 0.1 && m.trig <= 100)) e.push("trigger 0.1–100");
+  if (m.bias + m.cwD > 100) e.push(`bias + CW delta = ${m.bias + m.cwD} > 100`);
+  if (m.bias + m.ccwD < 0) e.push(`bias + CCW delta = ${m.bias + m.ccwD} < 0`);
+  return e;
+}
+function refreshDerived(){
+  const e = profileErrors(mp), kp = num("KP") ?? gains.kp, db = num("DEADBAND") ?? 2;
+  const cyc = (d, ms) => (ms + 20 + Math.ceil(Math.abs(d) / Math.max(1, mp.recS)) * mp.recM) / 1000;
+  const dead = kp > 0 ? Math.max(db, mp.trig / kp) : Infinity;
+  $("mpDerived").innerHTML =
+    `<span>CW wheel <b>${mp.bias}→${mp.bias + mp.cwD} %</b></span><span>CCW wheel <b>${mp.bias}→${mp.bias + mp.ccwD} %</b></span>` +
+    `<span>cycle CW <b>${cyc(mp.cwD, mp.cwM).toFixed(2)} s</b> · CCW <b>${cyc(mp.ccwD, mp.ccwM).toFixed(2)} s</b></span>` +
+    `<span title="At rest a kick needs |Kp·error| ≥ trigger">angle deadband ≈ <b>${Number.isFinite(dead) ? dead.toFixed(1) + "°" : "∞ (Kp 0)"}</b> (Kp ${kp})</span>` +
+    (e.length ? `<span class="bad">invalid: ${e.join(" · ")}</span>` : "");
+}
+function refreshProfileReadout(){
+  const g = k => fields.has("MOM_PROFILE." + k) ? fields.get("MOM_PROFILE." + k).v : null;
+  const chip = $("mpChip");
+  if (fwProfiles === false){ chip.textContent = "v2.1 firmware: no profiles"; chip.className = "chip"; }
+  else if (g("READY") === "1"){ chip.textContent = "profile READY on spacecraft"; chip.className = "chip ok"; }
+  else if (g("READY") === "0"){ chip.textContent = "profile NOT READY on spacecraft"; chip.className = "chip bad"; }
+  else { chip.textContent = "profile: unknown"; chip.className = "chip"; }
+  const has = g("READY") !== null;
+  $("mpBiasCur").textContent = has ? g("BIAS") : "";
+  $("mpCwCur").textContent = has ? `${g("CW_DELTA")} / ${g("CW_ASSIST")} / ${g("CW_MS")}` : "";
+  $("mpCcwCur").textContent = has ? `${g("CCW_DELTA")} / ${g("CCW_ASSIST")} / ${g("CCW_MS")}` : "";
+  $("mpRecCur").textContent = has ? `${g("REC_STEP")} / ${g("REC_MS")} ms` : "";
+  $("mpTrigCur").textContent = has ? g("TRIGGER") : "";
+  $("mpFw").textContent = fwProfiles === false ? "This firmware has no momentum profiles (v2.1): MOMENTUM uses the v2.1 bias in PD tune." :
+    (fields.has("RW_STATE") ? "wheel: " + fields.get("RW_STATE").v + (fields.has("RW_TARGET") ? ", target " + fields.get("RW_TARGET").v + " %" : "") : "");
+  refreshDerived();
+}
+async function detectProfiles(){
+  const r = await cmd("MOM_PROFILE_STATUS");
+  if (isAck(r)) fwProfiles = true; else if (r === "ERR,UNKNOWN_COMMAND") fwProfiles = false;
+  refreshProfileReadout(); return fwProfiles;
+}
+async function sendProfile(msgEl){
+  const e = profileErrors(mp);
+  if (e.length){ setMsg(msgEl, "Fix the profile first: " + e.join(" · "), "err"); return false; }
+  if (!needLink(msgEl)) return false;
+  const list = [`MOM_PROFILE_BIAS,${mp.bias}`, `MOM_PROFILE_CW,${mp.cwD},${mp.cwA},${mp.cwM}`, `MOM_PROFILE_CCW,${mp.ccwD},${mp.ccwA},${mp.ccwM}`,
+    `MOM_PROFILE_RECOVERY,${mp.recS},${mp.recM}`, `MOM_PROFILE_TRIGGER,${mp.trig}`];
+  for (const c of list){
+    const r = await cmd(c);
+    if (r === "ERR,UNKNOWN_COMMAND"){ fwProfiles = false; refreshProfileReadout(); setMsg(msgEl, "This firmware has no momentum profiles (v2.1).", "err"); return false; }
+    if (!isAck(r)){ setMsg(msgEl, `${c} refused: ${r}` + (r.includes("MANUAL") ? " — Release (MANUAL) first." : ""), "err"); return false; }
+  }
+  await cmd("MOM_PROFILE_STATUS"); await sleep(250);
+  const ok = num("MOM_PROFILE.READY") === 1;
+  setMsg(msgEl, ok ? "Profile sent. Spacecraft reports READY." : "Profile sent but the spacecraft does not report READY. Read it back and check.", ok ? "ok" : "err");
+  return ok;
+}
+// Called by Go to target and both mission modes, after ADCS is MANUAL.
+async function momentumPreflight(msgEl, stopped){
+  if (strategy() !== "MOMENTUM") return true;
+  if (fwProfiles === null) await detectProfiles();
+  if (fwProfiles === false) return true;                       // v2.1: legacy momentum, nothing to check
+  if (stopped()) return false;
+  await cmd("MOM_PROFILE_STATUS"); await sleep(250);
+  if (num("MOM_PROFILE.READY") !== 1){
+    if (!$("mpAuto").checked){ setMsg(msgEl, "Momentum profile not ready on the spacecraft. Momentum tab → Send profile.", "err"); return false; }
+    setMsg(msgEl, "Spacecraft has no momentum profile. Re-sending the saved one…");
+    if (!(await sendProfile($("mpMsg")))){ setMsg(msgEl, "Could not send the momentum profile: " + $("mpMsg").textContent, "err"); return false; }
+  }
+  if (stopped()) return false;
+  const bias = num("MOM_PROFILE.BIAS"), f = fields.get("RW_CMD");
+  const atBias = f && f.t > lastWheelStopT + 300 && Math.abs(Number(f.v) - bias) <= 1;
+  const r = await cmd("ADCS_PREPARE");
+  if (!isAck(r)){ setMsg(msgEl, "ADCS_PREPARE refused: " + r, "err"); return false; }
+  if (!atBias){
+    // Spinning the wheel up from rest throws the body into a turn. Wait the minimum time, then until the
+    // gyro says the body is still (|rate| < 2 °/s for 1 s). Give up waiting after +20 s and continue.
+    const w = Number($("spinWait").value) || 0, t0 = performance.now();
+    let stillSince = null;
+    for (;;){
+      if (stopped()) return false;
+      const el = (performance.now() - t0) / 1000, fr = fields.get("GYRO_Z"), fresh = fr && performance.now() - fr.t < 1000, rate = fresh ? Number(fr.v) : null;
+      if (el >= w){
+        if (!fresh) break;                                         // no ADCS telemetry: fixed wait only
+        if (Math.abs(rate) < 2){ if (stillSince === null) stillSince = performance.now(); if (performance.now() - stillSince >= 1000) break; }
+        else stillSince = null;
+        if (el > w + 20){ sys(`Body still turning ${rate.toFixed(1)} °/s after spin-up; continuing anyway.`); break; }
+      }
+      setMsg(msgEl, `Spinning the wheel up to bias ${bias} %, waiting for the body to stop… ${el.toFixed(1)} s` + (fresh ? ` (rate ${rate.toFixed(1)} °/s)` : ""));
+      await sleep(250);
+    }
+  }
+  return !stopped();
+}
+function initMomentum(){
+  for (const [id, k] of Object.entries(MP_IN)){
+    const el = $(id); el.value = mp[k];
+    el.addEventListener("input", () => { mp[k] = Number(el.value); store.set("momProfile", mp); refreshDerived(); });
+  }
+  $("spinWait").value = store.get("spinWait", 3);
+  $("spinWait").addEventListener("input", () => store.set("spinWait", Number($("spinWait").value)));
+  $("mpAuto").checked = store.get("mpAuto", true);
+  $("mpAuto").addEventListener("change", () => store.set("mpAuto", $("mpAuto").checked));
+  $("btnMpSend").addEventListener("click", () => sendProfile($("mpMsg")));
+  $("btnMpRead").addEventListener("click", async () => {
+    if (!needLink($("mpMsg"))) return;
+    const ok = await detectProfiles();
+    setMsg($("mpMsg"), ok === false ? "This firmware has no momentum profiles (v2.1)." : "Read back. Spacecraft values are shown on the right of each row.", ok === false ? "err" : "");
+  });
+  $("btnMpClear").addEventListener("click", async () => {
+    if (!needLink($("mpMsg"))) return;
+    const r = await cmd("MOM_PROFILE_CLEAR"); await cmd("MOM_PROFILE_STATUS");
+    setMsg($("mpMsg"), isAck(r) ? "Profile cleared on the spacecraft. Momentum AUTO is now refused until you send one." : "Clear refused: " + r, isAck(r) ? "" : "err");
+  });
+  $("btnPrep").addEventListener("click", async () => {
+    if (!needLink($("mpMsg"))) return;
+    const r = await cmd("ADCS_PREPARE");
+    setMsg($("mpMsg"), isAck(r) ? "ADCS_PREPARE sent: the wheel spins up to the profile bias. Wait until the body stops turning." : "Prepare refused: " + r, isAck(r) ? "ok" : "err");
+  });
+  $("btnManBias").addEventListener("click", async () => {
+    if (!needLink($("mpMsg"))) return;
+    const r = await cmd("RW_BIAS," + Math.round(Number($("manBias").value)));
+    setMsg($("mpMsg"), isAck(r) ? "RW_BIAS set." : "RW_BIAS refused: " + r + (r.includes("MOMENTUM") ? " — set strategy MOMENTUM first." : ""), isAck(r) ? "ok" : "err");
+  });
+  $("btnManCmd").addEventListener("click", async () => {
+    if (!needLink($("mpMsg"))) return;
+    const r = await cmd(`RW_CMD,${Math.round(Number($("manD").value))},${Math.round(Number($("manA").value))},${Math.round(Number($("manM").value))}`);
+    setMsg($("mpMsg"), isAck(r) ? "RW_CMD sent. In MANUAL the wheel stays at the new target until you send RW_BIAS." : "RW_CMD refused: " + r, isAck(r) ? "ok" : "err");
+  });
+  $("btnKickClear").addEventListener("click", () => { kicks.list = []; kicks.n = 0; renderKicks(); });
+  $("btnKickCsv").addEventListener("click", () => {
+    const rows = ["kick,time,mode,dir,wheel_target,step,angle_before_deg,angle_after_deg,delta_deg,delta_3s_deg,cycle_s"].concat(kicks.list.map(k =>
+      [k.id, k.wall.toISOString(), k.mode, k.dir || "", k.target ?? "", k.step ?? "", k.a0 ?? "", k.a1 ?? "", dTheta(k) ?? "", dTheta3(k) ?? "", ((k.tEnd - k.t0)/1000).toFixed(3)].join(",")));
+    download(rows.join("\n"), "sunseek_kicks_");
+  });
+  refreshProfileReadout(); renderKicks();
+}
+
+/* ------------------------------ kick log ------------------------------ */
+const kicks = {list: [], cur: null, prevRw: null, n: 0};
+function angleAt(t){
+  const s = series.get("ANGLE_REL") || series.get("EST_ANGLE") || series.get("SUN_ANGLE");
+  if (!s || !s.length) return null;
+  let v = s[0][1]; for (const q of s){ if (q[0] <= t) v = q[1]; else break; } return v;
+}
+// Nominal bias = the most recent report: RW telemetry, profile status, or ADCS_PREPARE.
+const profBias = () => {
+  let best = null;
+  for (const k of ["RW_BIAS", "MOM_PROFILE.BIAS", "ADCS_PREPARE.BIAS"]){ const f = fields.get(k); if (f && (!best || f.t > best.t)) best = f; }
+  const n = best ? Number(best.v) : NaN; return Number.isFinite(n) ? n : null;
+};
+const dTheta = k => (k.a0 === null || k.a1 === null || k.a0 === undefined || k.a1 === undefined) ? null : wrap180(k.a1 - k.a0);
+const dTheta3 = k => (k.a0 === null || k.a0 === undefined || k.a3 === null || k.a3 === undefined) ? null : wrap180(k.a3 - k.a0);
+function kickStart(t0, dir, mode){
+  kicks.cur = {id: ++kicks.n, t0, wall: new Date(), dir, mode, a0: angleAt(t0), target: null, step: curStep && !curStep.done ? curStep.id : null};
+}
+function kickEnd(t){
+  const k = kicks.cur; if (!k) return;
+  kicks.cur = null; k.tEnd = t;
+  setTimeout(() => { k.a1 = angleAt(performance.now()); kicks.list.push(k); if (kicks.list.length > 300) kicks.list.shift(); renderKicks(); stepRenderDue = true; }, 500);
+  // creep check: angle 3 s after the end, only if no other kick started meanwhile
+  setTimeout(() => { if (!kicks.cur && !kicks.list.some(o => o.t0 > k.t0)) { k.a3 = angleAt(performance.now()); renderKicks(); } }, 3000);
+}
+function kickSample(p){
+  const bias = profBias();
+  if (strategy() !== "MOMENTUM" || bias === null || bias === 0){ kicks.prevRw = p.rw; return; }
+  if (!kicks.cur){
+    if (kicks.prevRw === bias && p.rw !== bias && p.rw !== 0) kickStart(p.t - 125, p.rw > bias ? "CW" : "CCW", p.mode);
+  } else if (p.rw === 0) kicks.cur = null;                          // wheel stopped: not a kick
+  else if (p.rw === bias && p.t - kicks.cur.t0 > 200) kickEnd(p.t);
+  kicks.prevRw = p.rw;
+}
+function kickEvent(kind, value){
+  if (strategy() !== "MOMENTUM") return;
+  const now = performance.now(), bias = profBias();
+  if (kind === "assist_done"){
+    const dir = bias === null ? null : (value > bias ? "CW" : "CCW");
+    if (!kicks.cur){ const ms = num(dir === "CCW" ? "MOM_PROFILE.CCW_MS" : "MOM_PROFILE.CW_MS") ?? 0; kickStart(now - ms - 20, dir, fields.has("ADCS_MODE") ? fields.get("ADCS_MODE").v : "?"); }
+    if (dir) kicks.cur.dir = dir;
+    kicks.cur.target = value;
+  } else if (kind === "recovered") kickEnd(now);
+}
+function renderKicks(){
+  const body = $("kickBody"); body.innerHTML = "";
+  if (!kicks.list.length){ body.innerHTML = '<tr><td colspan="10" style="text-align:left;color:var(--muted)">No kicks yet. They appear in MOMENTUM with the ADCS stream on.</td></tr>'; }
+  for (const k of kicks.list.slice(-40).reverse()){
+    const tr = document.createElement("tr"), d = dTheta(k);
+    const d3 = dTheta3(k), sg = v => v === null ? "—" : (v > 0 ? "+" : "") + v.toFixed(2) + "°";
+    [k.id, k.wall.toTimeString().slice(0,8), k.mode, k.dir || "?", k.target ?? "—", f1(k.a0, 2), f1(k.a1, 2), sg(d), sg(d3), ((k.tEnd - k.t0)/1000).toFixed(2) + " s"]
+      .forEach(c => { const td = document.createElement("td"); td.textContent = c; tr.appendChild(td); });
+    body.appendChild(tr);
+  }
+  const stat = dir => {
+    const ds = kicks.list.filter(k => k.dir === dir).map(dTheta).filter(v => v !== null);
+    if (!ds.length) return `<span>${dir}: <b>—</b></span>`;
+    const mu = ds.reduce((a,b) => a+b, 0) / ds.length, sd = Math.sqrt(ds.reduce((a,b) => a + (b-mu)*(b-mu), 0) / ds.length);
+    return `<span>${dir}: <b>${ds.length}</b> kicks, mean Δθ <b>${mu >= 0 ? "+" : ""}${mu.toFixed(2)}°</b> ± ${sd.toFixed(2)}</span>`;
+  };
+  const cyc = kicks.list.map(k => (k.tEnd - k.t0) / 1000);
+  $("kickSum").innerHTML = stat("CW") + stat("CCW") + (cyc.length ? `<span>mean cycle <b>${(cyc.reduce((a,b) => a+b, 0) / cyc.length).toFixed(2)} s</b></span>` : "");
+}
+
+/* ====================== PAYLOAD CAMERA (Wi-Fi) ====================== */
+// The ESP32-CAM is its own Wi-Fi access point (SUNSEEK-PAYLOAD, 192.168.4.1). Its HTTP API answers with
+// CORS "*", so this page can read it directly: /status, /images, /image?name=… on :80, MJPEG on :81/stream.
+// Capture and stream on/off are UART commands, so they still go through the spacecraft (BLE/USB).
+const cam = {base: store.get("camUrl", "http://192.168.4.1"), on: false, poll: null, fails: 0, status: null,
+  streamPort: 81, streaming: false, img: null, view: {name: null, blob: null}, lastCapture: null};
+const CAM_FIELDS = [["fw","firmware"],["ready","ready"],["camera","camera"],["storage","SD card"],["wifi","wifi"],["stream","stream"],
+  ["stream_clients","viewers"],["image_count","images"],["last_image","last image"],["last_image_size","last size"],["frame_size","frame"],["psram","psram"],["camera_fallback","fallback"]];
+const fmtBytes = b => b >= 1048576 ? (b/1048576).toFixed(2) + " MB" : b >= 1024 ? (b/1024).toFixed(1) + " KB" : b + " B";
+function camUrl(path){ return cam.base.replace(/\/+$/, "") + path; }
+function camStreamUrl(){
+  try{ const u = new URL(cam.base); u.port = String(cam.streamPort); u.pathname = "/stream"; u.search = ""; return u.toString(); }
+  catch(_){ return cam.base.replace(/\/+$/, "") + ":" + cam.streamPort + "/stream"; }
+}
+function camLearnStreamUrl(url){
+  try{ const u = new URL(url); if (u.port) cam.streamPort = Number(u.port); if (!cam.on){ cam.base = u.origin.replace(/:\d+$/, ""); $("camUrl").value = cam.base; } }catch(_){}
+}
+async function camFetch(path, opt = {}){
+  const ctl = new AbortController(); const t = setTimeout(() => ctl.abort(), opt.timeout || 2500);
+  try{ return await fetch(camUrl(path), {signal: ctl.signal, cache: "no-store"}); }
+  finally{ clearTimeout(t); }
+}
+function setCamChip(text, cls){
+  $("camChip").textContent = text; $("camChip").className = "chip " + (cls || "");
+  const h = $("chipCam"); h.textContent = "CAM " + (cls === "ok" ? "OK" : cls === "bad" ? "LOST" : "—"); h.className = "state " + (cls === "ok" ? "on" : cls === "bad" ? "err" : "");
+}
+function renderCamStatus(){
+  const box = $("camKv"); box.innerHTML = "";
+  const st = cam.status || {};
+  for (const [k, label] of CAM_FIELDS){
+    let v = st[k]; if (v === undefined) v = "—";
+    if (typeof v === "boolean") v = v ? "yes" : "no";
+    if (k === "last_image_size" && Number.isFinite(Number(v)) && v !== "—") v = fmtBytes(Number(v));
+    const good = (k === "ready" && v === "yes") || (k === "camera" && v === "OK") || (k === "storage" && v === "OK") || (k === "wifi" && v === "READY") || (k === "psram" && v === "yes") || (k === "camera_fallback" && v === "no") || (k === "stream" && v === "ON");
+    const bad = (k === "ready" && v === "no") || (k === "camera" && v === "ERR") || (k === "storage" && v === "ERR") || (k === "psram" && v === "no") || (k === "camera_fallback" && v === "yes");
+    const d = document.createElement("div"); d.innerHTML = `<span>${label}</span><b class="${good ? "ok" : bad ? "bad" : ""}"></b>`; d.lastChild.textContent = v; box.appendChild(d);
+  }
+  if (!cam.status) box.innerHTML = '<div style="grid-column:1/-1"><span>status</span><b>press Connect camera (Mac must be on the SUNSEEK-PAYLOAD Wi-Fi)</b></div>';
+  $("streamInfo").textContent = cam.status ? `payload stream ${cam.status.stream || "?"} · ${cam.status.stream_clients ?? 0} viewer(s) · ${camStreamUrl()}` : "";
+}
+async function camPollOnce(){
+  try{
+    const r = await camFetch("/status", {timeout: 2000});
+    if (!r.ok) throw new Error("HTTP " + r.status);
+    const j = await r.json();
+    cam.status = j; cam.fails = 0;
+    if (j.stream_port) cam.streamPort = Number(j.stream_port);
+    setCamChip("camera reachable · " + (j.ready ? "READY" : "NOT READY"), j.ready ? "ok" : "warn");
+    renderCamStatus();
+    return true;
+  }catch(e){
+    cam.fails++;
+    if (cam.fails >= 2){ setCamChip("camera unreachable", "bad"); if (cam.fails === 2) setMsg($("camMsg"), `No answer from ${cam.base}. Is this Mac on the SUNSEEK-PAYLOAD Wi-Fi? Is the camera powered (5 V, not 3V3)? If the console is open over https, the camera cannot be reached — use start_console.command.`, "err"); }
+    return false;
+  }
+}
+async function camConnect(){
+  cam.base = $("camUrl").value.trim() || "http://192.168.4.1"; store.set("camUrl", cam.base);
+  if (!/^http:\/\//i.test(cam.base)){ setMsg($("camMsg"), "Use an http:// address (the camera has no https).", "err"); return; }
+  if (location.protocol === "https:") setMsg($("camMsg"), "This page is open over https, so Chrome will block the http camera. Open the console with start_console.command (http://localhost).", "err");
+  cam.on = true; cam.fails = 0; setCamChip("connecting…", "");
+  clearInterval(cam.poll); cam.poll = setInterval(camPollOnce, 2000);
+  if (await camPollOnce()){
+    setMsg($("camMsg"), `Camera ${cam.status.fw ? "v" + cam.status.fw : ""} reachable at ${cam.base}. Stream on port ${cam.streamPort}.`, "ok");
+    camGallery();
+  }
+}
+function camDisconnect(){
+  cam.on = false; clearInterval(cam.poll); cam.poll = null; cam.status = null; cam.fails = 0;
+  camStreamStop(false); setCamChip("not connected", ""); renderCamStatus();
+  setMsg($("camMsg"), "Disconnected from the camera (Wi-Fi stays as it is).", "");
+}
+/* ---- live stream ---- */
+function camStreamShow(){
+  const f = $("streamFrame"); f.innerHTML = "";
+  const tag = document.createElement("span"); tag.className = "tag live"; tag.textContent = "LIVE"; f.appendChild(tag);
+  const img = document.createElement("img"); img.alt = "Live camera stream";
+  img.addEventListener("error", () => {
+    if (!cam.streaming) return;
+    f.innerHTML = '<span class="ph">The camera refused the stream (503) or the connection dropped.<br>The payload stream is OFF, or another viewer holds it. Press Start stream (needs BLE/USB to the spacecraft).</span>';
+    cam.streaming = false; cam.img = null;
+  });
+  img.src = camStreamUrl() + "?t=" + Date.now();
+  f.appendChild(img); cam.img = img; cam.streaming = true;
+}
+async function camStreamStart(sendCmd){
+  if (sendCmd){
+    if (!link){ setMsg($("capMsg"), "Not connected to the spacecraft: cannot send PAYLOAD_STREAM_START. Use View only if the stream is already on.", "err"); return; }
+    const r = await cmd("PAYLOAD_STREAM_START");
+    if (!isAck(r)){ setMsg($("capMsg"), "PAYLOAD_STREAM_START: " + r, "err"); return; }
+    await sleep(600);                         // payload answers ACK,STREAM_START + EVENT,STREAM_ON over UART first
+  }
+  camStreamShow();
+  setMsg($("capMsg"), "Streaming from " + camStreamUrl() + ". One viewer at a time; a second browser tab would wait.", "");
+}
+function camStreamStop(sendCmd){
+  cam.streaming = false;
+  if (cam.img){ cam.img.src = ""; cam.img.remove(); cam.img = null; }
+  $("streamFrame").innerHTML = '<span class="ph">Stream stopped.</span>';
+  if (sendCmd && link) cmd("PAYLOAD_STREAM_STOP");
+}
+/* ---- capture / view / download ---- */
+function camShowBlob(name, blob){
+  const f = $("viewFrame"); f.innerHTML = "";
+  if (cam.view.url) URL.revokeObjectURL(cam.view.url);
+  const url = URL.createObjectURL(blob);
+  const tag = document.createElement("span"); tag.className = "tag"; tag.textContent = name; f.appendChild(tag);
+  const img = document.createElement("img"); img.alt = name; img.src = url; f.appendChild(img);
+  cam.view = {name, blob, url};
+  $("viewInfo").textContent = `${name} · ${fmtBytes(blob.size)}`; $("btnDlView").disabled = false;
+}
+async function camFetchImage(name){
+  const r = await camFetch("/image?name=" + encodeURIComponent(name).replace(/%2F/gi, "/"), {timeout: 20000});
+  if (!r.ok) throw new Error("HTTP " + r.status + (r.status === 503 ? " (SD card not ready)" : r.status === 404 ? " (no such file)" : ""));
+  return await r.blob();
+}
+async function camView(name){
+  if (!cam.on){ setMsg($("capMsg"), "Connect the camera first (Payload tab → Connect camera).", "err"); return false; }
+  setMsg($("capMsg"), "Loading " + name + " …");
+  try{ const b = await camFetchImage(name); camShowBlob(name, b); setMsg($("capMsg"), `${name} · ${fmtBytes(b.size)}`, "ok"); return true; }
+  catch(e){ setMsg($("capMsg"), `Could not load ${name}: ${e.message}`, "err"); return false; }
+}
+async function camDownload(name){
+  if (!cam.on){ setMsg($("capMsg"), "Connect the camera first.", "err"); return; }
+  if (cam.view.name === name && cam.view.blob){ downloadBlob(cam.view.blob, name.replace(/^\//, "")); return; }
+  setMsg($("capMsg"), "Downloading " + name + " …");
+  try{ const b = await camFetchImage(name); downloadBlob(b, name.replace(/^\//, "")); setMsg($("capMsg"), `Saved ${name} (${fmtBytes(b.size)}) to your Downloads folder.`, "ok"); }
+  catch(e){ setMsg($("capMsg"), `Download failed: ${e.message}`, "err"); }
+}
+function camLatestName(){
+  const s = cam.status && cam.status.last_image; if (s && s !== "---" && s !== "") return s;
+  const f = fields.get("LAST_IMAGE"); if (f && f.v && f.v !== "---") return f.v;
+  return cam.lastCapture ? cam.lastCapture.name : null;
+}
+async function camCapture(){
+  if (!link){ setMsg($("capMsg"), "Not connected to the spacecraft: CAPTURE goes over BLE/USB → UART to the camera.", "err"); return; }
+  setMsg($("capMsg"), "CAPTURE sent, waiting for IMAGE_READY (SD write takes 0.3–1 s)…");
+  const t0 = performance.now();
+  const p = waitImageReady(8000);
+  const r = await cmd("CAPTURE");
+  if (!isAck(r)){ setMsg($("capMsg"), "CAPTURE: " + r, "err"); return; }
+  const got = await p;
+  if (!got){ setMsg($("capMsg"), "No IMAGE_READY within 8 s. Payload STATUS? (ERR,CAPTURE_FAILED = SD card problem.)", "err"); return; }
+  setMsg($("capMsg"), `${got.name} · ${fmtBytes(got.bytes)} in ${((performance.now() - t0)/1000).toFixed(2)} s.`, "ok");
+}
+function camOnCaptured(name, bytes){
+  cam.lastCapture = {name, bytes, t: Date.now()};
+  // Competition rule: pictures stay unseen until the mission is complete, so nothing is fetched while one is running.
+  if (cam.on && $("optAutoShow").checked && !seq.running) setTimeout(() => { if (!seq.running) camView(name).then(ok => { if (ok) camGallery(); }); }, 300);
+}
+/* ---- gallery ---- */
+async function camGallery(){
+  if (!cam.on) return;
+  const body = $("galBody");
+  try{
+    const r = await camFetch("/images", {timeout: 5000});
+    if (!r.ok) throw new Error("HTTP " + r.status + (r.status === 503 ? " (SD card not ready)" : ""));
+    const list = await r.json();
+    const idx = n => { const m = String(n).match(/(\d+)/); return m ? Number(m[1]) : -1; };
+    list.sort((a, b) => idx(b.name) - idx(a.name));
+    body.innerHTML = "";
+    if (!list.length) body.innerHTML = '<tr><td colspan="4" style="text-align:left;color:var(--muted)">No images on the card.</td></tr>';
+    for (const it of list){
+      const tr = document.createElement("tr");
+      const td1 = document.createElement("td"); td1.textContent = it.name;
+      const td2 = document.createElement("td"); td2.textContent = fmtBytes(Number(it.size) || 0);
+      const td3 = document.createElement("td"); const b3 = document.createElement("button"); b3.type = "button"; b3.className = "x"; b3.textContent = "view"; b3.addEventListener("click", () => camView(it.name)); td3.appendChild(b3);
+      const td4 = document.createElement("td"); const b4 = document.createElement("button"); b4.type = "button"; b4.className = "x"; b4.textContent = "save"; b4.addEventListener("click", () => camDownload(it.name)); td4.appendChild(b4);
+      tr.append(td1, td2, td3, td4); body.appendChild(tr);
+    }
+    const total = list.reduce((a, b) => a + (Number(b.size) || 0), 0);
+    $("galInfo").textContent = `${list.length} image(s), ${fmtBytes(total)}`;
+  }catch(e){ $("galInfo").textContent = "list failed: " + e.message; }
+}
+function initPayload(){
+  $("camUrl").value = cam.base;
+  $("btnCamConnect").addEventListener("click", camConnect);
+  $("btnCamDisconnect").addEventListener("click", camDisconnect);
+  $("btnStreamOn").addEventListener("click", () => camStreamStart(true));
+  $("btnStreamView").addEventListener("click", () => camStreamStart(false));
+  $("btnStreamOff").addEventListener("click", () => camStreamStop(true));
+  $("btnCapture").addEventListener("click", camCapture);
+  $("btnShowLatest").addEventListener("click", async () => { const n = camLatestName(); if (!n){ setMsg($("capMsg"), "No image known yet. Capture one, or Refresh list.", "err"); return; } camView(n); });
+  $("btnDlLatest").addEventListener("click", async () => {
+    if (cam.on) await camPollOnce();
+    const n = camLatestName(); if (!n){ setMsg($("capMsg"), "No image known yet.", "err"); return; } camDownload(n);
+  });
+  $("btnDlView").addEventListener("click", () => { if (cam.view.name) camDownload(cam.view.name); });
+  $("btnGallery").addEventListener("click", camGallery);
+  $("mBtnView").addEventListener("click", () => { if (seq.running) return; document.querySelector('[data-tab="tabPayload"]').click(); if (cam.on) camGallery(); });
+  $("optAutoShow").checked = store.get("autoShow", true);
+  $("optAutoShow").addEventListener("change", () => store.set("autoShow", $("optAutoShow").checked));
+  const xh = () => { for (const id of ["viewFrame", "streamFrame"]) $(id).classList.toggle("xh", $("optXhair").checked); };
+  $("optXhair").checked = store.get("xhair", true); xh();
+  $("optXhair").addEventListener("change", () => { store.set("xhair", $("optXhair").checked); xh(); });
+  renderCamStatus();
+}
+
+/* =================== ADCS samples → steps + mission ================= */
+function onAdcsSample(p){
+  if (Number.isFinite(p.target) && Number.isFinite(p.e)){
+    let s = series.get("ANGLE_REL"); if (!s){ s = []; series.set("ANGLE_REL", s); addPlotOption("ANGLE_REL"); }
+    s.push([p.t, p.target - p.e]); if (s.length > MAX_PTS) s.shift();
+  }
+  const c = $("chipAdcs"); c.textContent = "ADCS " + p.mode; c.className = "state " + (p.mode === "AUTO" ? "act" : "");
+  if (curStep && !curStep.done){
+    if (p.mode === "AUTO" && Math.abs(p.target - curStep.target) < 0.01) curStep.samples.push(p);
+    if (p.mode !== "AUTO" && curStep.samples.length) stepEnd();
+    else if (performance.now() - curStep.t0 > STEP_MAX_MS) stepEnd();
+    stepRenderDue = true;
+  }
+  kickSample(p);
+  finSample(p);
+  consoleSample(p);
+}
+let stepRenderDue = false;
+
+/* ============================== PLOTS ============================== */
+let dirty = true;
+function buildPinned(){
+  const box = $("pinned"); box.innerHTML = "";
+  for (const k of PINNED){
+    const d = document.createElement("div");
+    d.innerHTML = `<span>${k}</span><b id="pin_${k}" class="stale">—</b>`;
+    box.appendChild(d);
+  }
+}
+function render(){
+  if (stepRenderDue){ stepRenderDue = false; renderSteps(); }
+  if (!dirty) return; dirty = false;
+  const now = performance.now();
+  for (const k of PINNED){
+    const el = $("pin_" + k), f = fields.get(k);
+    if (!f) continue;
+    el.textContent = f.v;
+    el.classList.toggle("stale", now - f.t > 3000);
+  }
+  const all = $("all"); const keys = [...fields.keys()].sort();
+  all.innerHTML = "";
+  for (const k of keys){
+    const a = document.createElement("span"); a.textContent = k;
+    const b = document.createElement("span"); b.textContent = fields.get(k).v;
+    all.append(a, b);
+  }
+  autoPlotKey();
+  drawAll();
+}
+function addPlotOption(k){
+  const o = document.createElement("option"); o.value = o.textContent = k; $("plotKey").appendChild(o);
+}
+let userPicked = false;
+function autoPlotKey(){
+  if (userPicked) return;
+  const prefer = ["POINTING_ERROR","EST_ANGLE","SUN_ANGLE","GYRO_Z","RW_CMD"];
+  const now = performance.now();
+  const live = k => { const s = series.get(k); return s && s.length >= 2 && now - s[s.length-1][0] < 3000; };
+  const pick = prefer.find(live) || [...series.keys()].find(live);
+  if (pick) $("plotKey").value = pick;
+}
+function cssVar(n){ return getComputedStyle(document.documentElement).getPropertyValue(n).trim(); }
+function prepCanvas(c){
+  const dpr = window.devicePixelRatio || 1, W = c.clientWidth, H = c.clientHeight;
+  if (c.width !== Math.round(W*dpr) || c.height !== Math.round(H*dpr)){ c.width = Math.round(W*dpr); c.height = Math.round(H*dpr); }
+  const ctx = c.getContext("2d"); ctx.setTransform(dpr,0,0,dpr,0,0); ctx.clearRect(0,0,W,H);
+  ctx.font = "11px " + cssVar("--mono");
+  return {ctx, W, H};
+}
+// lines: [{pts, color, dash, width, step}]; opt: {span, lo, hi, band:[lo,hi], hlines:[{v, color, dash}], empty}
+function drawChart(c, lines, opt){
+  const {ctx, W, H} = prepCanvas(c);
+  const span = opt.span || 30000, tEnd = performance.now(), tStart = tEnd - span;
+  const vis = lines.map(l => ({...l, pts: (l.pts || []).filter(p => p[0] >= tStart - 2000)}));
+  let vals = vis.flatMap(l => l.pts.map(p => p[1]));
+  if (opt.band) vals.push(opt.band[0], opt.band[1]);
+  if (!vals.length){ ctx.fillStyle = cssVar("--muted"); ctx.fillText(opt.empty || "waiting for telemetry…", 10, 18); return; }
+  let lo = opt.lo ?? Math.min(...vals), hi = opt.hi ?? Math.max(...vals);
+  if (hi - lo < 1e-6){ lo -= 1; hi += 1; }
+  if (opt.lo === undefined){ const pad = (hi - lo) * 0.1; lo -= pad; hi += pad; }
+  const L = 44, R = 8, T = 6, B = 16;
+  const x = t => L + (t - tStart) / span * (W - L - R);
+  const y = v => T + (hi - v) / (hi - lo) * (H - T - B);
+  if (opt.band){ ctx.fillStyle = cssVar("--band"); const y1 = y(opt.band[1]), y2 = y(opt.band[0]); ctx.fillRect(L, y1, W - L - R, y2 - y1); }
+  ctx.strokeStyle = cssVar("--rule"); ctx.lineWidth = 1; ctx.fillStyle = cssVar("--muted"); ctx.setLineDash([]);
+  const ticks = opt.ticks || 4;
+  for (let i = 0; i <= ticks; i++){
+    const v = lo + (hi-lo)*i/ticks, yy = Math.round(y(v)) + .5;
+    ctx.beginPath(); ctx.moveTo(L, yy); ctx.lineTo(W-R, yy); ctx.stroke();
+    ctx.fillText(v.toFixed(Math.abs(hi-lo) < 10 ? 1 : 0), 4, yy + 4);
+  }
+  for (const h of (opt.hlines || [])){
+    if (h.v < lo || h.v > hi) continue;
+    ctx.strokeStyle = cssVar(h.color || "--muted"); ctx.setLineDash(h.dash || []); const yy = Math.round(y(h.v)) + .5;
+    ctx.beginPath(); ctx.moveTo(L, yy); ctx.lineTo(W-R, yy); ctx.stroke();
+  }
+  ctx.setLineDash([]); ctx.fillStyle = cssVar("--muted");
+  ctx.fillText("−" + Math.round(span/1000) + " s", L, H - 3); ctx.fillText("now", W - R - 22, H - 3);
+  ctx.save(); ctx.beginPath(); ctx.rect(L, 0, W - L - R, H); ctx.clip();
+  for (const l of vis){
+    if (l.pts.length < 1) continue;
+    ctx.strokeStyle = cssVar(l.color); ctx.lineWidth = l.width || 1.8; ctx.setLineDash(l.dash || []);
+    ctx.beginPath();
+    l.pts.forEach((p, i) => {
+      if (!i) ctx.moveTo(x(p[0]), y(p[1]));
+      else { if (l.step) ctx.lineTo(x(p[0]), y(l.pts[i-1][1])); ctx.lineTo(x(p[0]), y(p[1])); }
+    });
+    if (l.step) ctx.lineTo(x(tEnd), y(l.pts[l.pts.length-1][1]));
+    ctx.stroke();
+    if (l.dot){ const q = l.pts[l.pts.length-1]; ctx.fillStyle = cssVar(l.color); ctx.beginPath(); ctx.arc(x(q[0]), y(q[1]), 3, 0, 7); ctx.fill(); }
+  }
+  for (const mk of (opt.marks || [])){
+    if (mk.t < tStart) continue;
+    const xx = x(mk.t), yy = H - B - 2;
+    ctx.fillStyle = cssVar(mk.up ? "--copper" : "--wire"); ctx.beginPath();
+    if (mk.up){ ctx.moveTo(xx, yy - 8); ctx.lineTo(xx - 4, yy); ctx.lineTo(xx + 4, yy); } else { ctx.moveTo(xx, yy); ctx.lineTo(xx - 4, yy - 8); ctx.lineTo(xx + 4, yy - 8); }
+    ctx.fill();
+  }
+  ctx.restore();
+}
+function activeTol(){
+  if (seq.running && mRows[seq.idx]) return mRows[seq.idx].tol;
+  if (curStep && !curStep.done) return curStep.tol;
+  return Number($("band").value) || 2;
+}
+function drawAll(){
+  const angKey = series.has("ANGLE_REL") ? "ANGLE_REL" : (series.has("EST_ANGLE") ? "EST_ANGLE" : "SUN_ANGLE");
+  const tgt = series.get("TARGET"), tLast = tgt && tgt.length ? tgt[tgt.length-1][1] : null;
+  const tol = activeTol();
+  $("respNote").textContent = tLast === null ? "" : `target ${tLast}° ±${tol}°`;
+  drawChart($("resp"), [
+    {pts: tgt, color: "--wire", dash: [6,4], width: 1.4, step: true},
+    {pts: series.get(angKey), color: "--copper", dot: true}
+  ], {band: tLast === null ? null : [tLast - tol, tLast + tol], marks: kicks.list.concat(kicks.cur ? [kicks.cur] : []).map(k => ({t: k.t0, up: k.dir !== "CCW"})), empty: "turn on the ADCS stream (PD tune / Mission do it for you)"});
+  const maxRw = num("MAX_RW_COMMAND") ?? 80;
+  drawChart($("rwc"), [{pts: series.get("RW_CMD"), color: "--copper", step: true, width: 1.5}],
+    {lo: -100, hi: 100, ticks: 2, hlines: [{v: maxRw, color: "--bad", dash: [4,4]}, {v: -maxRw, color: "--bad", dash: [4,4]}, {v: 0, color: "--muted"}], empty: "no RW_CMD yet"});
+  const k = $("plotKey").value, s = series.get(k);
+  drawChart($("plot"), [{pts: s, color: "--copper", dot: true}], {empty: "waiting for numeric telemetry…"});
+  const last = s && s.length ? s[s.length-1][1] : null;
+  $("plotVal").textContent = last === null ? "" : "latest " + last;
+}
+setInterval(() => { dirty = true; render(); }, 250);
+
+/* ============================== LINKS ============================== */
+function setState(text, cls){ const s = $("state"); s.textContent = text; s.className = "state " + (cls||""); }
+function setConnected(on){ $("btnBle").disabled = on; $("btnSer").disabled = on; $("btnDis").disabled = !on; }
+function onDisconnected(){
+  link = null; fwProfiles = null; refreshProfileReadout(); setState("disconnected"); setConnected(false);
+  if (waiter){ const w = waiter; waiter = null; clearTimeout(w.timer); w.resolve("ERR,NOT_CONNECTED"); }
+  if (seq.running){
+    seq.running = false; clearInterval(seq.poll); stepEnd();
+    setMsg($("mMsg"), "Link lost during the mission. The spacecraft keeps doing what it was doing (AUTO holds its last target). Reconnect and press STOP or Abort.", "err");
+    renderTargets();
+  }
+}
+
+async function connectBLE(){
+  if (!navigator.bluetooth){ sys("This browser has no Web Bluetooth. Use Google Chrome or Microsoft Edge on macOS."); setState("no Web Bluetooth","err"); return; }
+  try{
+    setState("choose device…");
+    const device = await navigator.bluetooth.requestDevice({
+      filters: [{namePrefix: "SUNSEEK"}, {services: [NUS]}],
+      optionalServices: [NUS]
+    });
+    sys("Connecting to " + (device.name || device.id) + " …");
+    device.addEventListener("gattserverdisconnected", () => { sys("BLE disconnected."); onDisconnected(); });
+    const server = await device.gatt.connect();
+    const svc = await server.getPrimaryService(NUS);
+    const rx = await svc.getCharacteristic(NUS_RX);
+    const tx = await svc.getCharacteristic(NUS_TX);
+    const dec = new TextDecoder();
+    tx.addEventListener("characteristicvaluechanged", e => onRxText(dec.decode(e.target.value)));
+    await tx.startNotifications();
+    const enc = new TextEncoder();
+    const canNR = rx.properties.writeWithoutResponse;
+    let q = Promise.resolve();
+    link = {
+      kind: "BLE",
+      send(text){
+        const bytes = enc.encode(text + "\n");
+        q = q.then(async () => {
+          for (let i = 0; i < bytes.length; i += 180){
+            const part = bytes.slice(i, i + 180);
+            if (canNR) await rx.writeValueWithoutResponse(part); else await rx.writeValue(part);
+          }
+        }).catch(err => sys("Write failed: " + err.message));
+        return q;
+      },
+      close(){ device.gatt.disconnect(); }
+    };
+    setState("BLE · " + (device.name || "connected"), "on"); setConnected(true);
+    sys("Connected over BLE. Sending STATUS.");
+    send("STATUS");
+    detectProfiles();
+  }catch(err){
+    if (err.name === "NotFoundError") { sys("No device chosen."); setState("disconnected"); return; }
+    sys("BLE error: " + err.message + "  (check: Chrome allowed in System Settings → Privacy & Security → Bluetooth; board powered; Windows PC not still connected to it)");
+    setState("BLE error","err");
+  }
+}
+
+async function connectSerial(){
+  if (!navigator.serial){ sys("This browser has no Web Serial. Use Google Chrome or Microsoft Edge."); setState("no Web Serial","err"); return; }
+  try{
+    const port = await navigator.serial.requestPort();
+    await port.open({baudRate: 115200});
+    const enc = new TextEncoder(); const writer = port.writable.getWriter();
+    let reading = true; const reader = port.readable.getReader(); const dec = new TextDecoder();
+    (async () => {
+      try{ while (reading){ const {value, done} = await reader.read(); if (done) break; if (value) onRxText(dec.decode(value, {stream:true})); } }
+      catch(e){ sys("USB read stopped: " + e.message); }
+      finally{ try{ reader.releaseLock(); }catch(_){} }
+    })();
+    link = {
+      kind: "USB",
+      send(text){ return writer.write(enc.encode(text + "\n")).catch(e => sys("Write failed: " + e.message)); },
+      async close(){ reading = false; try{ await reader.cancel(); }catch(_){} try{ writer.releaseLock(); }catch(_){} try{ await port.close(); }catch(_){} onDisconnected(); sys("USB closed."); }
+    };
+    setState("USB · 115200", "on"); setConnected(true);
+    sys("USB open. The board may reset when the port opens; boot messages follow.");
+    setTimeout(() => { if (link){ send("STATUS"); detectProfiles(); } }, 2500);
+  }catch(err){
+    if (err.name === "NotFoundError") { sys("No port chosen."); return; }
+    sys("USB error: " + err.message + "  (close the PlatformIO / Arduino serial monitor first — only one program can hold the port)");
+    setState("USB error","err");
+  }
+}
+
+/* ============================ UI WIRING ============================ */
+function buildQuick(){
+  const q = $("quick");
+  for (const [grp, items] of QUICK){
+    const g = document.createElement("span"); g.className = "grp"; g.textContent = grp; q.appendChild(g);
+    for (const it of items){
+      const [label, c] = Array.isArray(it) ? it : [it, it];
+      const b = document.createElement("button"); b.type = "button"; b.textContent = label; b.title = c;
+      b.addEventListener("click", () => send(c)); q.appendChild(b);
+    }
+  }
+}
+/* =========================== SUN CAL =============================== */
+// Records averaged raw LDR counts at known angles, fits NDV→angle, emits estimateSunAngle() for Config_Sensor.h.
+let scPts = store.get("sunCal", []);          // [{a, n, L, R, ndv, sd, fw, use}]
+let scDark = store.get("sunDark", null);      // {L, R}
+let scModel = store.get("sunModel", "LUT");
+let scRec = null;                             // {kind:"point"|"dark", need, L:[], R:[], ndv:[], fw:[], timer}
+let scLast = null;                            // latest sample {L, R, ndv, fw, t}
+let scFitRes = null;
+const scSat = () => Number($("scSat").value) || 4000;
+const scFloor = () => Number($("scFloor").value) || 0;
+const scNdv = (L, R) => (L + R) > 0 ? (L - R) / (L + R) : 0;
+const scMean = v => v.length ? v.reduce((s, x) => s + x, 0) / v.length : NaN;
+const scSd = v => { if (v.length < 2) return 0; const m = scMean(v); return Math.sqrt(v.reduce((s, x) => s + (x - m) ** 2, 0) / (v.length - 1)); };
+function scFlags(L, R, ndvSd){
+  const f = [];
+  if (Math.max(L, R) >= scSat()) f.push("SAT");
+  if (L + R < scFloor()) f.push("DARK");
+  if (ndvSd > 0.02) f.push("NOISY");
+  return f;
+}
+function onSunSample(L, R, fw){
+  if (!Number.isFinite(L) || !Number.isFinite(R)) return;
+  scLast = {L, R, ndv: scNdv(L, R), fw, t: performance.now()};
+  if (scRec){
+    scRec.L.push(L); scRec.R.push(R); scRec.ndv.push(scLast.ndv); if (Number.isFinite(fw)) scRec.fw.push(fw);
+    clearTimeout(scRec.timer); scRec.timer = setTimeout(scRecTimeout, 3000);
+    setMsg($("scMsg"), `Recording ${scRec.kind === "dark" ? "dark" : $("scAngle").value + "°"} … ${scRec.L.length}/${scRec.need}`);
+    if (scRec.L.length >= scRec.need) scRecDone();
+  }
+  scRenderLive();
+}
+function scRecTimeout(){
+  if (!scRec) return;
+  const got = scRec.L.length; scRec = null;
+  setMsg($("scMsg"), got ? `Stopped after ${got} samples — SUN stream went quiet. Press Start and record again.` : "No SUN telemetry arriving. Press Start (sends TM_STREAM,SUN,ON) and check the link.", "err");
+  $("scRecord").disabled = false; $("scDark").disabled = false;
+}
+function scRecDone(){
+  const r = scRec; scRec = null; clearTimeout(r.timer);
+  $("scRecord").disabled = false; $("scDark").disabled = false;
+  const L = scMean(r.L), R = scMean(r.R);
+  if (r.kind === "dark"){
+    scDark = {L: Math.round(L), R: Math.round(R)}; store.set("sunDark", scDark);
+    setMsg($("scMsg"), `Dark recorded: L ${scDark.L}, R ${scDark.R} counts. Both should be small (< ~200) and similar.`, scDark.L + scDark.R < 2 * scFloor() ? "ok" : "warn");
+    scRenderLive(); return;
+  }
+  const a = Number($("scAngle").value);
+  const pt = {a, n: r.L.length, L: Math.round(L * 10) / 10, R: Math.round(R * 10) / 10, ndv: scNdv(L, R), sd: scSd(r.ndv), fw: r.fw.length ? scMean(r.fw) : null, use: true};
+  const i = scPts.findIndex(p => p.a === a); const replaced = i >= 0;
+  if (replaced) scPts[i] = pt; else scPts.push(pt);
+  scPts.sort((x, y) => x.a - y.a); store.set("sunCal", scPts);
+  const fl = scFlags(pt.L, pt.R, pt.sd);
+  setMsg($("scMsg"), `${replaced ? "Replaced" : "Recorded"} ${a}°: L ${pt.L.toFixed(0)}, R ${pt.R.toFixed(0)}, NDV ${pt.ndv.toFixed(4)} ±${pt.sd.toFixed(4)}` + (fl.length ? ` — ${fl.join(", ")}` : "") + ". Next angle set.", fl.includes("SAT") ? "err" : (fl.length ? "warn" : "ok"));
+  // step the angle input toward the far end automatically: −90 → +90 sweep
+  const step = Number($("scAngle").step) || 5; if (a + step <= 90) $("scAngle").value = a + step;
+  scRenderTable(); scFit(); scDraw();
+}
+function scStartRec(kind){
+  if (!needLink($("scMsg"))) return;
+  if (!scLast || performance.now() - scLast.t > 1500){ setMsg($("scMsg"), "No SUN telemetry in the last 1.5 s — press Start first.", "err"); return; }
+  if (kind === "point" && !Number.isFinite(Number($("scAngle").value))){ setMsg($("scMsg"), "Enter the true angle first.", "err"); return; }
+  scRec = {kind, need: Math.max(3, Number($("scN").value) || 20), L: [], R: [], ndv: [], fw: [], timer: setTimeout(scRecTimeout, 3000)};
+  $("scRecord").disabled = true; $("scDark").disabled = true;
+  setMsg($("scMsg"), "Recording … hold still.");
+}
+function scRenderLive(){
+  const el = $("scLive"); const s = scLast; const stale = !s || performance.now() - s.t > 1500;
+  const fl = s ? scFlags(s.L, s.R, 0) : [];
+  const cell = (k, v, cls) => `<div><span>${k}</span><b class="${cls || ""}">${v}</b></div>`;
+  el.innerHTML =
+    cell("SUN_L", s ? s.L : "—", stale ? "stale" : (s.L >= scSat() ? "bad" : "")) +
+    cell("SUN_R", s ? s.R : "—", stale ? "stale" : (s.R >= scSat() ? "bad" : "")) +
+    cell("L+R", s ? s.L + s.R : "—", stale ? "stale" : (s.L + s.R < scFloor() ? "bad" : "")) +
+    cell("NDV (L−R)/(L+R)", s ? s.ndv.toFixed(4) : "—", stale ? "stale" : "") +
+    cell("FW SUN_ANGLE", s && Number.isFinite(s.fw) ? s.fw.toFixed(2) + "°" : "—", stale ? "stale" : "") +
+    cell("Status", stale ? "no stream" : (fl.length ? fl.join(" ") : "OK") + (scDark ? ` · dark ${scDark.L}/${scDark.R}` : ""), stale ? "stale" : (fl.length ? "bad" : "ok"));
+}
+function scRenderTable(){
+  const tb = $("scBody"); tb.innerHTML = "";
+  if (!scPts.length){ tb.innerHTML = '<tr><td colspan="12" style="text-align:left;color:var(--muted)">No points yet.</td></tr>'; return; }
+  const flat = scFlatSet();
+  scPts.forEach((p, i) => {
+    const tr = document.createElement("tr");
+    const fl = scFlags(p.L, p.R, p.sd); if (flat.has(i)) fl.push("FLAT");
+    const err = Number.isFinite(p.fw) ? p.fw - p.a : null;
+    const td = (h, cls) => { const d = document.createElement("td"); d.innerHTML = h; if (cls) d.className = cls; tr.appendChild(d); return d; };
+    const u = document.createElement("input"); u.type = "checkbox"; u.checked = p.use !== false; u.addEventListener("change", () => { p.use = u.checked; store.set("sunCal", scPts); scFit(); scDraw(); });
+    td("").appendChild(u);
+    td(p.a + "°"); td(p.n); td(p.L.toFixed(0)); td(p.R.toFixed(0)); td((p.L + p.R).toFixed(0)); td(p.ndv.toFixed(4)); td(p.sd.toFixed(4));
+    td(Number.isFinite(p.fw) ? p.fw.toFixed(2) + "°" : "—");
+    td(err === null ? "—" : (err > 0 ? "+" : "") + err.toFixed(2) + "°", err !== null && Math.abs(err) > 2 ? "bad" : "");
+    td(fl.join(" "), fl.includes("SAT") ? "bad" : "");
+    const x = document.createElement("button"); x.type = "button"; x.className = "x"; x.textContent = "✕"; x.title = "Delete point";
+    x.addEventListener("click", () => { scPts.splice(i, 1); store.set("sunCal", scPts); scRenderTable(); scFit(); scDraw(); });
+    td("").appendChild(x);
+    if (p.use === false) tr.style.opacity = ".5";
+    tb.appendChild(tr);
+  });
+}
+// Points where NDV barely changes with angle (|dNDV/dθ| < 25 % of the median slope) — the curve has flattened; exclude them.
+function scFlatSet(){
+  const s = new Set(); if (scPts.length < 4) return s;
+  const sl = [];
+  for (let i = 0; i < scPts.length; i++){
+    const j = i === 0 ? 1 : i - 1, k = i === scPts.length - 1 ? scPts.length - 2 : i + 1;
+    const a = scPts[Math.min(j, k)], b = scPts[Math.max(j, k)];
+    sl.push(b.a === a.a ? 0 : Math.abs((b.ndv - a.ndv) / (b.a - a.a)));
+  }
+  const med = sl.slice().sort((x, y) => x - y)[Math.floor(sl.length / 2)];
+  sl.forEach((v, i) => { if (med > 0 && v < 0.25 * med) s.add(i); });
+  return s;
+}
+function scUsed(){ return scPts.filter(p => p.use !== false); }
+// Least squares polynomial fit angle = Σ c_k ndv^k, degree d (normal equations, Gaussian elimination).
+function scPolyFit(pts, d){
+  const n = d + 1, A = Array.from({length: n}, () => new Array(n + 1).fill(0));
+  for (const p of pts){ const x = p.ndv, y = p.a; for (let i = 0; i < n; i++){ for (let j = 0; j < n; j++) A[i][j] += x ** (i + j); A[i][n] += y * x ** i; } }
+  for (let c = 0; c < n; c++){
+    let piv = c; for (let r = c + 1; r < n; r++) if (Math.abs(A[r][c]) > Math.abs(A[piv][c])) piv = r;
+    [A[c], A[piv]] = [A[piv], A[c]]; if (Math.abs(A[c][c]) < 1e-12) return null;
+    for (let r = 0; r < n; r++){ if (r === c) continue; const f = A[r][c] / A[c][c]; for (let k = c; k <= n; k++) A[r][k] -= f * A[c][k]; }
+  }
+  return A.map((row, i) => row[n] / row[i]);
+}
+const scPolyEval = (c, x) => c.reduce((s, ck, k) => s + ck * x ** k, 0);
+function scLutEval(xs, ys, x){
+  const n = xs.length; if (x <= xs[0]) return ys[0]; if (x >= xs[n - 1]) return ys[n - 1];
+  let i = 1; while (i < n - 1 && xs[i] < x) i++;
+  const f = (x - xs[i - 1]) / (xs[i] - xs[i - 1]); return ys[i - 1] + f * (ys[i] - ys[i - 1]);
+}
+function scFit(){
+  const pts = scUsed().slice().sort((x, y) => x.ndv - y.ndv);
+  const el = $("scFit"); scFitRes = null;
+  if (pts.length < 5){ el.innerHTML = `Record at least 5 points (have ${pts.length} in use), then Generate C++.`; return null; }
+  // monotonic: angle must increase with NDV (+angle = L > R). Decreasing everywhere = sign reversed.
+  let inc = 0, dec = 0, dup = 0;
+  for (let i = 1; i < pts.length; i++){ if (pts[i].ndv === pts[i - 1].ndv) dup++; else if (pts[i].a > pts[i - 1].a) inc++; else dec++; }
+  const reversed = dec > inc, mono = (reversed ? inc : dec) === 0 && dup === 0;
+  const xs = pts.map(p => p.ndv), ys = pts.map(p => p.a);
+  let evalF, coef = null, note = "";
+  if (scModel === "LIN"){ coef = scPolyFit(pts, 1); if (!coef) return null; evalF = x => scPolyEval(coef, x); }
+  else if (scModel === "POLY"){ coef = scPolyFit(pts, 3); if (!coef) return null; evalF = x => scPolyEval(coef, x); }
+  else { evalF = x => scLutEval(xs, ys, x); }
+  // residuals: for LUT leave-one-out (interpolate each point from its neighbours), otherwise plain fit residual
+  const res = pts.map((p, i) => {
+    if (scModel !== "LUT") return evalF(p.ndv) - p.a;
+    if (i === 0 || i === pts.length - 1) return 0;
+    const xs2 = xs.slice(0, i).concat(xs.slice(i + 1)), ys2 = ys.slice(0, i).concat(ys.slice(i + 1));
+    return scLutEval(xs2, ys2, p.ndv) - p.a;
+  });
+  const maxE = Math.max(...res.map(Math.abs)), rms = Math.sqrt(scMean(res.map(r => r * r)));
+  const sat = pts.filter(p => Math.max(p.L, p.R) >= scSat()).length;
+  const flat = scFlatSet(); const flatUsed = scPts.filter((p, i) => flat.has(i) && p.use !== false).length;
+  scFitRes = {pts, xs, ys, evalF, coef, maxE, rms, mono, reversed, res};
+  const b = (t, bad) => `<b class="${bad ? "bad" : ""}" style="${bad ? "color:var(--bad)" : ""}">${t}</b>`;
+  el.innerHTML = [
+    `points ${b(pts.length)}`, `angle ${b(Math.min(...ys))}…${b(Math.max(...ys))}°`,
+    `NDV ${b(xs[0].toFixed(3))}…${b(xs[xs.length-1].toFixed(3))}`,
+    `monotonic ${b(mono ? "yes" : "NO", !mono)}`, reversed ? b("NDV DECREASES with angle — L/R swapped or angle sign reversed", true) : "",
+    `${scModel === "LUT" ? "leave-one-out" : "fit"} err max ${b(maxE.toFixed(2) + "°", maxE > 3)} rms ${b(rms.toFixed(2) + "°")}`,
+    sat ? b(sat + " saturated point(s) in use — uncheck or reduce light", true) : "",
+    flatUsed ? b(flatUsed + " FLAT point(s) in use — curve has flattened, consider unchecking", true) : "",
+  ].filter(Boolean).join(" · ");
+  return scFitRes;
+}
+function scGen(){
+  const f = scFit(); if (!f){ setMsg($("scMsg"), "Need at least 5 usable points to fit.", "err"); return; }
+  const d = new Date().toISOString().slice(0, 16).replace("T", " ");
+  const hdr = `/* Sun-sensor model — SunSeek Console, ${d}
+   ${f.pts.length} points, angle ${Math.min(...f.ys)}…${Math.max(...f.ys)}°, NDV ${f.xs[0].toFixed(4)}…${f.xs[f.xs.length-1].toFixed(4)}
+   ${scModel === "LUT" ? "LUT + linear interpolation, leave-one-out" : scModel === "POLY" ? "cubic polynomial, fit" : "linear, fit"} error max ${f.maxE.toFixed(2)}°, rms ${f.rms.toFixed(2)}°${f.mono ? "" : "\n   WARNING: data not monotonic — check the points marked FLAT/SAT"}
+   Valid for this baffle, this light source and this distance only.
+   Replace the TEAM AREA estimateSunAngle() in include/Config_Sensor.h with this block. */\n`;
+  let code;
+  if (scModel === "LUT"){
+    const n = f.xs.length;
+    code = hdr +
+      `static const float SUN_LUT_NDV[${n}]   = { ${f.xs.map(x => x.toFixed(4) + "f").join(", ")} };\n` +
+      `static const float SUN_LUT_ANGLE[${n}] = { ${f.ys.map(y => y.toFixed(1) + "f").join(", ")} };\n` +
+      `inline float estimateSunAngle(float ndv) {\n` +
+      `  const int n = ${n};\n` +
+      `  if (ndv <= SUN_LUT_NDV[0])     return SUN_LUT_ANGLE[0];\n` +
+      `  if (ndv >= SUN_LUT_NDV[n - 1]) return SUN_LUT_ANGLE[n - 1];\n` +
+      `  int i = 1;\n  while (i < n - 1 && SUN_LUT_NDV[i] < ndv) ++i;\n` +
+      `  float f = (ndv - SUN_LUT_NDV[i - 1]) / (SUN_LUT_NDV[i] - SUN_LUT_NDV[i - 1]);\n` +
+      `  return SUN_LUT_ANGLE[i - 1] + f * (SUN_LUT_ANGLE[i] - SUN_LUT_ANGLE[i - 1]);\n}\n`;
+  } else {
+    const c = f.coef.map(v => v.toFixed(4) + "f");
+    const expr = scModel === "LIN" ? `${c[0]} + ${c[1]} * ndv` : `${c[0]} + ndv * (${c[1]} + ndv * (${c[2]} + ndv * ${c[3]}))`;
+    code = hdr + `inline float estimateSunAngle(float ndv) {\n  float a = ${expr};\n  return constrain(a, -90.0f, 90.0f);\n}\n`;
+  }
+  $("scCode").value = code; setMsg($("scMsg"), f.mono ? "C++ generated below. Copy it into include/Config_Sensor.h, build, upload, then re-record to verify." : "Generated, but the data is NOT monotonic — the model will be wrong where the curve folds back. Uncheck the FLAT/SAT points and generate again.", f.mono ? "ok" : "err");
+}
+function scDraw(){
+  const cv = $("scPlot"); if (!cv.isConnected || cv.clientWidth === 0) return;
+  const dpr = window.devicePixelRatio || 1, W = cv.clientWidth, H = 230;
+  if (cv.width !== Math.round(W * dpr)){ cv.width = Math.round(W * dpr); cv.height = Math.round(H * dpr); }
+  const g = cv.getContext("2d"); g.setTransform(dpr, 0, 0, dpr, 0, 0); g.clearRect(0, 0, W, H);
+  const cs = getComputedStyle(document.documentElement), ink = cs.getPropertyValue("--ink").trim(), muted = cs.getPropertyValue("--muted").trim(), rule = cs.getPropertyValue("--rule").trim(), copper = cs.getPropertyValue("--copper").trim() || "#b3372e", bad = cs.getPropertyValue("--bad").trim() || "#c0392b";
+  const pl = 48, pr = 12, pt = 10, pb = 26; const x0 = pl, x1 = W - pr, y0 = pt, y1 = H - pb;
+  const X = a => x0 + (a + 90) / 180 * (x1 - x0), Y = n => y1 - (n + 1) / 2 * (y1 - y0);
+  g.font = "11px ui-monospace, Menlo, monospace"; g.textAlign = "center"; g.textBaseline = "top";
+  g.strokeStyle = rule; g.fillStyle = muted; g.lineWidth = 1;
+  for (let a = -90; a <= 90; a += 30){ g.beginPath(); g.moveTo(X(a), y0); g.lineTo(X(a), y1); g.stroke(); g.fillText(a + "°", X(a), y1 + 6); }
+  g.textAlign = "right"; g.textBaseline = "middle";
+  for (let n = -1; n <= 1; n += 0.5){ g.beginPath(); g.moveTo(x0, Y(n)); g.lineTo(x1, Y(n)); g.stroke(); g.fillText(n.toFixed(1), x0 - 6, Y(n)); }
+  g.textAlign = "left"; g.textBaseline = "top"; g.fillText("NDV vs true angle", x0 + 6, y0 + 2);
+  // model curve: sample NDV, map to angle
+  if (scFitRes){
+    g.strokeStyle = copper; g.lineWidth = 1.5; g.beginPath(); let first = true;
+    const lo = scFitRes.xs[0], hi = scFitRes.xs[scFitRes.xs.length - 1];
+    for (let k = 0; k <= 120; k++){ const n = lo + (hi - lo) * k / 120; const a = Math.max(-90, Math.min(90, scFitRes.evalF(n))); if (first){ g.moveTo(X(a), Y(n)); first = false; } else g.lineTo(X(a), Y(n)); }
+    g.stroke();
+  }
+  // default firmware line angle = 90·ndv
+  g.strokeStyle = muted; g.setLineDash([3, 4]); g.beginPath(); g.moveTo(X(-90), Y(-1)); g.lineTo(X(90), Y(1)); g.stroke(); g.setLineDash([]);
+  for (const p of scPts){
+    const satd = Math.max(p.L, p.R) >= scSat();
+    g.beginPath(); g.arc(X(p.a), Y(p.ndv), 4, 0, Math.PI * 2);
+    if (p.use === false){ g.strokeStyle = muted; g.stroke(); } else { g.fillStyle = satd ? bad : ink; g.fill(); }
+  }
+  g.fillStyle = muted; g.textAlign = "right"; g.textBaseline = "bottom"; g.fillText("dots = points (hollow = unused, red = saturated) · solid = model · dashed = default 90·NDV", x1 - 4, y1 - 4);
+}
+function scCsvText(){
+  const rows = ["angle_deg,n,sun_l,sun_r,sum,ndv,ndv_sd,fw_angle,use" + (scDark ? `,dark_l=${scDark.L},dark_r=${scDark.R}` : "")];
+  for (const p of scPts) rows.push([p.a, p.n, p.L.toFixed(1), p.R.toFixed(1), (p.L + p.R).toFixed(1), p.ndv.toFixed(5), p.sd.toFixed(5), Number.isFinite(p.fw) ? p.fw.toFixed(2) : "", p.use === false ? 0 : 1].join(","));
+  return rows.join("\n");
+}
+function scLoadCsv(text){
+  const out = []; const ls = text.split(/\r?\n/).filter(l => l.trim());
+  const head = ls[0].toLowerCase().split(","); const hasHead = /angle/.test(head[0]);
+  const ia = hasHead ? head.findIndex(h => /angle/.test(h) && !/fw/.test(h)) : 0, iL = hasHead ? head.findIndex(h => /sun_l|^l$|left/.test(h)) : 1, iR = hasHead ? head.findIndex(h => /sun_r|^r$|right/.test(h)) : 2, iN = hasHead ? head.indexOf("n") : -1, iSd = hasHead ? head.indexOf("ndv_sd") : -1, iFw = hasHead ? head.indexOf("fw_angle") : -1, iU = hasHead ? head.indexOf("use") : -1;
+  for (const l of ls.slice(hasHead ? 1 : 0)){
+    const c = l.split(","); const a = Number(c[ia]), L = Number(c[iL]), R = Number(c[iR]);
+    if (![a, L, R].every(Number.isFinite)) continue;
+    out.push({a, n: iN >= 0 ? Number(c[iN]) || 1 : 1, L, R, ndv: scNdv(L, R), sd: iSd >= 0 ? Number(c[iSd]) || 0 : 0, fw: iFw >= 0 && c[iFw] !== "" ? Number(c[iFw]) : null, use: iU >= 0 ? c[iU] !== "0" : true});
+  }
+  if (!out.length){ setMsg($("scMsg"), "No usable rows (need angle, L, R columns).", "err"); return; }
+  scPts = out.sort((x, y) => x.a - y.a); store.set("sunCal", scPts); scRenderTable(); scFit(); scDraw();
+  setMsg($("scMsg"), `Loaded ${out.length} points.`, "ok");
+}
+function scSetModel(m){
+  scModel = m; store.set("sunModel", m);
+  $("scMLut").setAttribute("aria-pressed", m === "LUT"); $("scMPoly").setAttribute("aria-pressed", m === "POLY"); $("scMLin").setAttribute("aria-pressed", m === "LIN");
+  scFit(); scDraw();
+}
+function initSunCal(){
+  $("scStart").addEventListener("click", async () => {
+    if (!needLink($("scMsg"))) return;
+    setMsg($("scMsg"), "Starting …");
+    const r1 = await cmd("ADCS_MODE,MANUAL"); await cmd("RW_STOP"); const r2 = await cmd("TM_STREAM,SUN,ON"); await cmd("TM_RATE,10");
+    setMsg($("scMsg"), isAck(r2) ? "SUN stream on at 10 Hz, wheel stopped, MANUAL. Set the true angle and press Record." : `TM_STREAM,SUN,ON → ${r2}`, isAck(r2) ? "ok" : "err");
+  });
+  $("scStop").addEventListener("click", () => { if (needLink($("scMsg"))) cmd("TM_STREAM,SUN,OFF"); });
+  $("scRecord").addEventListener("click", () => scStartRec("point"));
+  $("scDark").addEventListener("click", () => scStartRec("dark"));
+  $("scMinus").addEventListener("click", () => { $("scAngle").value = Math.max(-90, Number($("scAngle").value) - 5); });
+  $("scPlus").addEventListener("click", () => { $("scAngle").value = Math.min(90, Number($("scAngle").value) + 5); });
+  $("scMLut").addEventListener("click", () => scSetModel("LUT")); $("scMPoly").addEventListener("click", () => scSetModel("POLY")); $("scMLin").addEventListener("click", () => scSetModel("LIN"));
+  $("scGen").addEventListener("click", scGen);
+  $("scCopy").addEventListener("click", async () => { const t = $("scCode").value; if (!t){ setMsg($("scMsg"), "Generate the code first.", "err"); return; } try{ await navigator.clipboard.writeText(t); setMsg($("scMsg"), "Code copied.", "ok"); }catch(_){ $("scCode").select(); setMsg($("scMsg"), "Select-all in the box and copy (clipboard blocked).", "warn"); } });
+  $("scCsv").addEventListener("click", () => { if (!scPts.length){ setMsg($("scMsg"), "No points to save.", "err"); return; } download(scCsvText(), "sunseek_suncal_"); });
+  $("scUnflag").addEventListener("click", () => { const flat = scFlatSet(); let n = 0; scPts.forEach((p, i) => { if ((flat.has(i) || Math.max(p.L, p.R) >= scSat()) && p.use !== false){ p.use = false; n++; } }); store.set("sunCal", scPts); scRenderTable(); scFit(); scDraw(); setMsg($("scMsg"), n ? `Unchecked ${n} point(s). Re-check the fit line; if it is still not monotonic, uncheck the outermost points by hand.` : "Nothing flagged.", n ? "ok" : ""); });
+  $("scLoad").addEventListener("click", () => $("scFile").click());
+  $("scFile").addEventListener("change", () => { const f = $("scFile").files[0]; if (!f) return; f.text().then(scLoadCsv); $("scFile").value = ""; });
+  $("scClear").addEventListener("click", () => { if (scPts.length && !confirm(`Delete all ${scPts.length} calibration points?`)) return; scPts = []; scDark = null; store.set("sunCal", scPts); store.set("sunDark", null); $("scCode").value = ""; scRenderTable(); scFit(); scDraw(); scRenderLive(); });
+  ["scSat", "scFloor"].forEach(id => $(id).addEventListener("change", () => { scRenderTable(); scFit(); scDraw(); scRenderLive(); }));
+  scSetModel(scModel); scRenderLive(); scRenderTable();
+  setInterval(() => { if (!$("tabSun").hidden){ scRenderLive(); scDraw(); } }, 500);
+}
+
+document.querySelectorAll('[role="tab"]').forEach(t => t.addEventListener("click", () => {
+  document.querySelectorAll('[role="tab"]').forEach(o => { o.setAttribute("aria-selected", o === t); $(o.dataset.tab).hidden = o !== t; });
+  store.set("tab", t.dataset.tab);
+}));
+{ const saved = store.get("tab", "tabCmd"); const t = document.querySelector(`[data-tab="${saved}"]`); if (t) t.click(); }
+
+function download(text, prefix, type = "text/csv"){
+  const blob = new Blob([text], {type});
+  downloadBlob(blob, prefix + new Date().toISOString().replace(/[:.]/g,"-") + ".csv");
+}
+function downloadBlob(blob, filename){
+  const a = document.createElement("a"); a.href = URL.createObjectURL(blob);
+  a.download = filename; a.click();
+  setTimeout(() => URL.revokeObjectURL(a.href), 4000);
+}
+$("btnBle").addEventListener("click", connectBLE);
+$("btnSer").addEventListener("click", connectSerial);
+$("btnDis").addEventListener("click", () => { if (link) link.close(); });
+$("btnStop").addEventListener("click", () => {
+  stopEpoch++;
+  if (seq.running){ seq.running = false; clearInterval(seq.poll); if (seq.status[seq.idx]) seq.status[seq.idx] = {s: "stopped", txt: "STOP pressed", frac: 0}; setMissionChip("STOPPED", "err"); setMsg($("mMsg"), "STOP pressed: mission stopped, wheel stopped.", "err"); renderTargets(); }
+  stepEnd();
+  if (!link){ sys("Not connected."); return; }
+  if (waiter){ const w = waiter; waiter = null; clearTimeout(w.timer); w.resolve("ERR,STOP_PRESSED"); }
+  noteSent("STOP"); addLine("STOP", "tx"); link.send("STOP");            // bypass the command queue: immediate
+});
+$("cmdForm").addEventListener("submit", e => {
+  e.preventDefault(); const v = $("cmd").value;
+  if (v.trim()){ history.push(v.trim()); if (history.length > 100) history.shift(); }
+  histPos = history.length; send(v); $("cmd").value = "";
+});
+$("cmd").addEventListener("keydown", e => {
+  if (e.key === "ArrowUp" && histPos > 0){ histPos--; $("cmd").value = history[histPos]; e.preventDefault(); }
+  if (e.key === "ArrowDown"){ histPos = Math.min(history.length, histPos + 1); $("cmd").value = history[histPos] || ""; e.preventDefault(); }
+});
+$("btnClear").addEventListener("click", () => { logEl.innerHTML = ""; lines = []; $("counts").textContent = "0 lines"; });
+$("btnCsv").addEventListener("click", () => {
+  const rows = ["time,direction,line"].concat(lines.map(l => `${l.t.toISOString()},${l.dir},"${l.text.replace(/"/g,'""')}"`));
+  download(rows.join("\n"), "sunseek_log_");
+});
+$("plotKey").addEventListener("change", () => { userPicked = true; dirty = true; render(); });
+window.addEventListener("resize", () => { dirty = true; });
+
+buildQuick(); buildPinned(); refreshTuneReadout(); setRunBy(runBy); renderSteps(); initMomentum(); initPayload(); initSunCal(); setRef(refSel, false, $("goMsg"));
+sys("Ready. Connect BLE (board name starts with SUNSEEK-) or USB (CP210x port).");
+if (!navigator.bluetooth) sys("Web Bluetooth not available in this browser — open this file in Google Chrome.");
+</script>
+</body>
+</html>

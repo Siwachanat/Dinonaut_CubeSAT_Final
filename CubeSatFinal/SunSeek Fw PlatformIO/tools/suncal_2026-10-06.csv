@@ -1,0 +1,20 @@
+# Sun sensor sweep, 6 Oct 2026, 10 deg steps, raw counts (notebook).
+# Angles are in the PLATFORM convention: + = CubeSat rotated right (lamp on the left LDR).
+# The notebook sheet used the opposite sign; every angle here is the sheet angle times -1.
+# Confirmed on the board 7 Oct 20:30: rotated right, L 3513 / R 3210.
+angle_deg,sun_l,sun_r
+70,3160,2711
+60,3367,2787
+50,3495,3141
+40,3575,3384
+30,3631,3545
+20,3661,3653
+10,3661,3725
+0,3600,3755
+-10,3539,3772
+-20,3437,3755
+-30,3257,3706
+-40,2975,3631
+-50,2560,3516
+-60,2551,3351
+-70,2479,3119
