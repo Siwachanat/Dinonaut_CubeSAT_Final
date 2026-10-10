@@ -1,4 +1,4 @@
-# 🛰️ SunSeek CubeSat: Firmware Team Dinonaut from DSKKU
+# 🛰️ SunSeek CubeSat: Team Dinonaut from DSKKU | Firmware & Ground Station
 
 Firmware ที่ทีมเราใช้ในการแข่งขัน CubeSat Sensor Competition ประกอบด้วยสองส่วน คือ **CubeSat OBC (ESP32-S3)** และ **ESP32-CAM Payload** ทั้งสองส่วนพัฒนาต่อจาก starter firmware ของผู้จัด
 
