@@ -216,7 +216,4 @@ MISSION_START
 
 ## 🙏 Credits
 
-- **Starter firmware, hardware kit และ protocol:** ผู้จัดการแข่งขัน (SunSeek Platform Firmware v3.0 และ ESP32-CAM Payload Firmware v3.0)
-- **การแก้ไขและส่วนที่เพิ่มเติม:** ทีมของเรา
-
-ถ้านำไปใช้หรือพัฒนาต่อ ฝากให้เครดิตผู้จัดและทีมด้วยนะครับ มีคำถามเปิด Issue ใน repo นี้ได้เลย 😊
+- **Starter firmware, hardware kit และ protocol:** ผู้จัดการแข่งขัน Thailand Young Satellite Challenge (SunSeek Platform Firmware v3.0 และ ESP32-CAM Payload Firmware v3.0)
